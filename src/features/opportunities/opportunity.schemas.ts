@@ -1,0 +1,105 @@
+import { z } from "zod";
+
+import { OpportunitySourceType, OpportunityStatus } from "@/generated/prisma/enums";
+
+/**
+ * Zod schemas for the universal Opportunity model.
+ *
+ * These describe the *normalized* shape. Provider-specific payloads (SAM.gov,
+ * BidNet, state portals) are mapped onto this shape by their connector before
+ * they ever reach the service layer — no provider field names appear here.
+ */
+
+const optionalText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .transform((value) => (value === "" ? undefined : value))
+    .optional();
+
+const moneySchema = z
+  .union([z.number(), z.string()])
+  .refine((value) => value !== "" && Number.isFinite(Number(value)), { error: "Must be a valid amount" })
+  .refine((value) => Number(value) >= 0, { error: "Must be zero or greater" })
+  .transform((value) => Number(value).toFixed(2))
+  .nullish();
+
+export const opportunityNaicsSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{2,6}$/, { error: "NAICS code must be 2–6 digits" }),
+  title: optionalText(200),
+  isPrimary: z.boolean().default(false),
+});
+
+export const opportunityPscSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9]{2,6}$/, { error: "PSC code must be 2–6 alphanumeric characters" })
+    .transform((value) => value.toUpperCase()),
+  title: optionalText(200),
+});
+
+export const createOpportunitySchema = z.object({
+  source: z.enum(OpportunitySourceType),
+  externalId: z.string().trim().min(1, { error: "externalId is required" }).max(200),
+  sourceUrl: z.url().max(1000).optional(),
+
+  title: z.string().trim().min(1, { error: "Title is required" }).max(500),
+  description: optionalText(20_000),
+  solicitationNumber: optionalText(120),
+
+  agency: optionalText(250),
+  subAgency: optionalText(250),
+  office: optionalText(250),
+
+  postedDate: z.coerce.date().nullish(),
+  responseDeadline: z.coerce.date().nullish(),
+
+  setAside: optionalText(120),
+  contractType: optionalText(120),
+
+  estimatedValueMin: moneySchema,
+  estimatedValueMax: moneySchema,
+
+  placeCity: optionalText(120),
+  placeState: optionalText(60),
+  placeCountry: optionalText(60),
+
+  status: z.enum(OpportunityStatus).default(OpportunityStatus.NEW),
+  /** Publication status as reported by the provider — distinct from the workflow status. */
+  sourceStatus: optionalText(60),
+
+  rawData: z.unknown().optional(),
+
+  naicsCodes: z.array(opportunityNaicsSchema).max(20).default([]),
+  pscCodes: z.array(opportunityPscSchema).max(20).default([]),
+});
+
+/** Only the internal workflow fields are editable from the dashboard. */
+export const updateOpportunityStatusSchema = z.object({
+  status: z.enum(OpportunityStatus),
+});
+
+export const listOpportunitiesQuerySchema = z.object({
+  search: optionalText(200),
+  source: z.enum(OpportunitySourceType).optional(),
+  status: z.enum(OpportunityStatus).optional(),
+  agency: optionalText(250),
+  naicsCode: optionalText(6),
+  setAside: optionalText(120),
+  /** Only return opportunities whose deadline is within this many days. */
+  deadlineWithinDays: z.coerce.number().int().min(1).max(365).optional(),
+  minMatchScore: z.coerce.number().min(0).max(100).optional(),
+  take: z.coerce.number().int().min(1).max(100).default(50),
+  skip: z.coerce.number().int().min(0).default(0),
+});
+
+export const opportunityIdSchema = z.string().trim().min(1).max(64);
+
+export type CreateOpportunityInput = z.infer<typeof createOpportunitySchema>;
+export type UpdateOpportunityStatusInput = z.infer<typeof updateOpportunityStatusSchema>;
+export type ListOpportunitiesQuery = z.infer<typeof listOpportunitiesQuerySchema>;

@@ -3,7 +3,12 @@
 # dependencies
 /node_modules
 /.pnp
-.pnp.js
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
 # testing
 /coverage
@@ -18,15 +23,26 @@
 # misc
 .DS_Store
 *.pem
+# ...but the Amazon RDS trust store is a public certificate bundle, and deployments
+# need it present to verify the database's TLS certificate.
+!certs/rds-global-bundle.pem
 
 # debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.pnpm-debug.log*
 
-# local env files
-.env*.local
-.env
+# env files (can opt-in for committing if needed)
+.env*
+# ...but the template must be committed.
+!.env.example
+
+# Agent skill packs installed by `prisma init`. Regenerable from skills-lock.json;
+# they are third-party editor tooling, not project source.
+.agents/
+.claude/
+.windsurf/
 
 # vercel
 .vercel
@@ -34,3 +50,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma

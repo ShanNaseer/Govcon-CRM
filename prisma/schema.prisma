@@ -1,0 +1,372 @@
+// GovCon CRM / RFP Intelligence Platform — Prisma schema
+//
+// Design notes:
+// - Multi-valued attributes (NAICS, PSC, keywords, certifications, ...) are modelled as
+//   normalized child tables rather than delimited strings, so they can be indexed,
+//   filtered and joined by the future matching engine.
+// - The Opportunity model is provider-agnostic ("universal"). Provider payloads are
+//   normalized before they reach this schema; the untouched payload is kept in `rawData`.
+// - Money is stored as Decimal to avoid float rounding; it is serialized as a string at
+//   the API boundary (see src/features/**/**.types.ts).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum ClientStatus {
+  ACTIVE
+  PROSPECT
+  INACTIVE
+  ARCHIVED
+}
+
+enum KeywordType {
+  POSITIVE
+  NEGATIVE
+}
+
+/// Source system an opportunity was ingested from. Extend as providers are added.
+enum OpportunitySourceType {
+  SAM_GOV
+  BIDNET
+  STATE_PORTAL
+  MANUAL
+  OTHER
+}
+
+/// Internal business workflow status. Deliberately separate from the publication
+/// status reported by the source system (Opportunity.sourceStatus).
+enum OpportunityStatus {
+  NEW
+  MATCHED
+  REVIEWING
+  INTERESTED
+  PASSED
+  PURSUING
+  PROPOSAL_IN_PROGRESS
+  SUBMITTED
+  WON
+  LOST
+}
+
+enum MatchRecommendation {
+  PURSUE
+  REVIEW
+  PASS
+}
+
+enum MatchStatus {
+  NEW
+  REVIEWING
+  SHORTLISTED
+  DISMISSED
+}
+
+// ---------------------------------------------------------------------------
+// Client (a company profile used for opportunity matching)
+// ---------------------------------------------------------------------------
+
+model Client {
+  id       String       @id @default(cuid())
+  name     String
+  initials String?
+  industry String?
+  status   ClientStatus @default(PROSPECT)
+
+  // GovCon identifiers
+  cageCode String?
+  uei      String? @unique
+
+  // Contact information
+  website String?
+  email   String?
+  phone   String?
+  city    String?
+  state   String?
+
+  // Matching profile
+  capabilityDescription String?
+  securityClearance     String?
+  geographicPreferences String[] @default([])
+  minContractValue      Decimal? @db.Decimal(14, 2)
+  maxContractValue      Decimal? @db.Decimal(14, 2)
+
+  naicsCodes       ClientNaicsCode[]
+  pscCodes         ClientPscCode[]
+  capabilities     ClientCapability[]
+  keywords         ClientKeyword[]
+  certifications   ClientCertification[]
+  setAsides        ClientSetAside[]
+  contractVehicles ClientContractVehicle[]
+  preferredAgencies ClientPreferredAgency[]
+  matches          OpportunityMatch[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([name])
+}
+
+model ClientNaicsCode {
+  id        String  @id @default(cuid())
+  clientId  String
+  code      String
+  title     String?
+  isPrimary Boolean @default(false)
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([clientId, code])
+  @@index([code])
+}
+
+model ClientPscCode {
+  id       String  @id @default(cuid())
+  clientId String
+  code     String
+  title    String?
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([clientId, code])
+  @@index([code])
+}
+
+model ClientCapability {
+  id          String  @id @default(cuid())
+  clientId    String
+  name        String
+  description String?
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([clientId, name])
+}
+
+model ClientKeyword {
+  id       String      @id @default(cuid())
+  clientId String
+  keyword  String
+  type     KeywordType
+  weight   Int?
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([clientId, keyword, type])
+  @@index([keyword])
+}
+
+model ClientCertification {
+  id        String    @id @default(cuid())
+  clientId  String
+  name      String
+  issuedBy  String?
+  expiresAt DateTime?
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([clientId, name])
+}
+
+/// Set-aside programs the client qualifies for (8(a), WOSB, SDVOSB, HUBZone, ...).
+/// Stored as a code plus optional label so new SBA program codes need no migration.
+model ClientSetAside {
+  id       String  @id @default(cuid())
+  clientId String
+  code     String
+  label    String?
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([clientId, code])
+  @@index([code])
+}
+
+model ClientContractVehicle {
+  id             String    @id @default(cuid())
+  clientId       String
+  name           String
+  contractNumber String?
+  expiresAt      DateTime?
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([clientId, name])
+}
+
+model ClientPreferredAgency {
+  id       String @id @default(cuid())
+  clientId String
+  name     String
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([clientId, name])
+}
+
+// ---------------------------------------------------------------------------
+// Opportunity (universal, provider-agnostic)
+// ---------------------------------------------------------------------------
+
+model Opportunity {
+  id String @id @default(cuid())
+
+  source     OpportunitySourceType
+  externalId String
+  sourceUrl  String?
+
+  title              String
+  description        String?
+  solicitationNumber String?
+
+  agency    String?
+  subAgency String?
+  office    String?
+
+  postedDate       DateTime?
+  responseDeadline DateTime?
+
+  setAside     String?
+  contractType String?
+
+  estimatedValueMin Decimal? @db.Decimal(14, 2)
+  estimatedValueMax Decimal? @db.Decimal(14, 2)
+
+  placeCity    String?
+  placeState   String?
+  placeCountry String?
+
+  /// Internal workflow status.
+  status OpportunityStatus @default(NEW)
+  /// Publication status as reported by the source system (e.g. "active", "archived").
+  sourceStatus String?
+
+  /// Normalized provider payload, retained for traceability and re-normalization.
+  rawData Json?
+
+  naicsCodes  OpportunityNaicsCode[]
+  pscCodes    OpportunityPscCode[]
+  attachments OpportunityAttachment[]
+  matches     OpportunityMatch[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Prevents duplicate imports of the same record from the same provider.
+  @@unique([source, externalId])
+  @@index([status])
+  @@index([responseDeadline])
+  @@index([postedDate])
+  @@index([agency])
+}
+
+model OpportunityNaicsCode {
+  id            String  @id @default(cuid())
+  opportunityId String
+  code          String
+  title         String?
+  isPrimary     Boolean @default(false)
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([opportunityId, code])
+  @@index([code])
+}
+
+model OpportunityPscCode {
+  id            String  @id @default(cuid())
+  opportunityId String
+  code          String
+  title         String?
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([opportunityId, code])
+  @@index([code])
+}
+
+/// File metadata only. The bytes live in S3 (private bucket, presigned access).
+model OpportunityAttachment {
+  id            String @id @default(cuid())
+  opportunityId String
+
+  fileName    String
+  contentType String?
+  fileSize    Int?
+
+  s3Bucket String
+  s3Key    String
+
+  sourceUrl String?
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([s3Bucket, s3Key])
+  @@index([opportunityId])
+}
+
+// ---------------------------------------------------------------------------
+// Matching
+// ---------------------------------------------------------------------------
+
+/// Join of Client x Opportunity produced by the matching pipeline.
+/// Scores are nullable: rule scoring runs first, semantic/AI stages fill in later.
+model OpportunityMatch {
+  id            String @id @default(cuid())
+  clientId      String
+  opportunityId String
+
+  ruleScore     Float?
+  semanticScore Float?
+  aiScore       Float?
+  overallScore  Float?
+
+  recommendation MatchRecommendation?
+  matchReasons   String[]             @default([])
+  risks          String[]             @default([])
+
+  status MatchStatus @default(NEW)
+
+  client      Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientId, opportunityId])
+  @@index([clientId, overallScore])
+  @@index([opportunityId])
+  @@index([status])
+}
