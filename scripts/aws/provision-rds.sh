@@ -83,7 +83,16 @@ if aws rds describe-db-instances --db-instance-identifier "${DB_INSTANCE_ID}" >/
 else
   # Generated locally; never echoed into CloudTrail-visible arguments beyond the
   # create call itself. Store it in .env (git-ignored) or Secrets Manager.
-  DB_PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+  # Every stage reads its input to EOF: `head` bounds /dev/urandom up front and `cut`
+  # consumes all of tr's output. Piping unbounded /dev/urandom into `head -c 32`
+  # instead leaves `tr` writing to a closed pipe, and the resulting SIGPIPE (141)
+  # aborts the script under `pipefail`. 1 KiB of random bytes yields ~240 alphanumeric
+  # characters, comfortably more than the 32 required.
+  DB_PASSWORD=$(head -c 1024 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-32)
+  if [[ "${#DB_PASSWORD}" -ne 32 ]]; then
+    echo "Failed to generate a 32-character password (got ${#DB_PASSWORD})." >&2
+    exit 1
+  fi
 
   aws rds create-db-instance \
     --db-instance-identifier "${DB_INSTANCE_ID}" \
