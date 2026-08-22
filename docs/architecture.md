@@ -122,16 +122,28 @@ File bytes never enter PostgreSQL; only metadata rows do.
 
 ## Authentication boundary
 
-Authentication is **not implemented**, and no custom password handling has been
-invented. `src/lib/auth/session.ts` is the single seam. Three call sites must be
-protected before deployment:
+Email/password against the `User` table, with server-side sessions in `Session`.
+`src/lib/auth/session.ts` is the single seam; `src/lib/auth/password.ts` holds the
+scrypt hashing.
 
-1. `src/app/(dashboard)/layout.tsx` — all dashboard routes
-2. Every handler under `src/app/api/` — each already calls `requireSession()`
-3. The storage endpoints — highest risk, since they mint object credentials
+The cookie carries an opaque 256-bit token and the table stores only its SHA-256,
+so a database disclosure yields no usable sessions, and revocation (sign-out or
+deactivation) is immediate.
 
-`getSession()` returns a development placeholder locally and `null` in production,
-so an unauthenticated build fails closed rather than silently exposing data.
+Three call sites are protected, all through that module:
+
+1. `src/features/**/*.service.ts` — `requireSession()` before every read and write.
+   **This is the enforcement point that matters**, because it sits at the data
+   source. A Next.js layout is explicitly not sufficient: it does not re-render on
+   client-side navigation and does not prevent nested segments from rendering, so a
+   layout-only check leaks records into the RSC payload.
+2. Every handler under `src/app/api/` — same function, mapped to `401`.
+3. Pages and `src/app/(dashboard)/layout.tsx` — `requireUser()`, which redirects to
+   `/login` rather than throwing, so an expired session lands on the sign-in form.
+
+The storage endpoints remain the highest-risk pair, since they mint object
+credentials; they authenticate and then scope the key by client via
+`canAccessClient`.
 
 ## Background processing (future)
 

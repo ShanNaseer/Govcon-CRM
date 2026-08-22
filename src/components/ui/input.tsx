@@ -1,4 +1,5 @@
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
+import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -30,11 +31,35 @@ export function Input({ className, icon, ...props }: InputProps) {
 
 export type SelectProps = SelectHTMLAttributes<HTMLSelectElement>;
 
+/**
+ * Native `<select>` with the platform indicator replaced.
+ *
+ * The design shows a single 16px chevron at 50% opacity. A bare native select
+ * renders the OS control instead — a double arrow on macOS — which is the most
+ * visible divergence from the design in the header, so the appearance is reset and
+ * the chevron drawn in. Still a real `<select>`, so it keeps native keyboard
+ * behaviour and the mobile picker, unlike a scripted listbox.
+ */
 export function Select({ className, children, ...props }: SelectProps) {
   return (
-    <select className={cn(FIELD_CLASSES, "h-9 pr-8", className)} {...props}>
-      {children}
-    </select>
+    <div className={cn("relative", className)}>
+      <select
+        className={cn(
+          FIELD_CLASSES,
+          // `className` sizes the wrapper, so the control fills it.
+          "h-9 w-full appearance-none pr-9",
+          // A disabled select must not offer a text cursor.
+          props.disabled && "cursor-not-allowed",
+        )}
+        {...props}
+      >
+        {children}
+      </select>
+      <ChevronDown
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 text-ink-muted opacity-50"
+      />
+    </div>
   );
 }
 

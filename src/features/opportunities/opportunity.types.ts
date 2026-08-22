@@ -102,4 +102,69 @@ export type OpportunityDashboardStats = {
   pursuingCount: number;
   submittedCount: number;
   closingSoonCount: number;
+  /**
+   * Count per workflow status, with every member present (absent groups are zero)
+   * so the dashboard's distribution panel can render a complete pipeline without
+   * treating "no rows" as a gap.
+   */
+  byStatus: Record<OpportunityStatus, number>;
+
+  /** Σ contract value of open opportunities, as a decimal string. */
+  pipelineValue: string;
+  /** Σ value × probability of win, as a decimal string. */
+  weightedValue: string;
+  /** Pipeline value divided by the number of open opportunities. */
+  averageDealSize: string;
+  /** Open opportunities — everything except won, lost and passed. */
+  activeCount: number;
+  /**
+   * Open opportunities that carry a usable contract value. Lower than
+   * `activeCount` means `pipelineValue` understates the real pipeline, which the
+   * dashboard says out loud rather than presenting the sum as complete.
+   */
+  pricedCount: number;
+  wonCount: number;
+  lostCount: number;
+  /** Won as a percentage of decided. Null when nothing has been decided yet. */
+  winRate: number | null;
+
+  stages: PipelineStageDto[];
+  recentAwards: DashboardOpportunityDto[];
+  awardForecast: DashboardOpportunityDto[];
+  deadlines: DashboardDeadlinesDto;
+};
+
+/** One phase of the lifecycle pipeline panel. */
+export type PipelineStageDto = {
+  name: string;
+  /** Σ contract value for the statuses in this phase, as a decimal string. */
+  value: string;
+  count: number;
+};
+
+export type DashboardOpportunityDto = {
+  id: string;
+  title: string;
+  agency: string | null;
+  /** COALESCE(max, min) as a decimal string, or null when unpriced. */
+  value: string | null;
+  probabilityOfWin: number | null;
+};
+
+export type DashboardDeadlineDto = {
+  id: string;
+  title: string;
+  agency: string | null;
+  /** ISO 8601. Serialized here so the DTO stays JSON-safe. */
+  deadline: string;
+  status: OpportunityStatus;
+};
+
+/** Deadlines bucketed by urgency, matching the dashboard's three columns. */
+export type DashboardDeadlinesDto = {
+  overdue: DashboardDeadlineDto[];
+  thisWeek: DashboardDeadlineDto[];
+  upcoming: DashboardDeadlineDto[];
+  overdueTotal: number;
+  thisWeekTotal: number;
 };

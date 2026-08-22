@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "dev:fresh": "rm -rf .next && prisma generate && next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -19,6 +20,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
+    "user:create": "tsx scripts/create-user.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

@@ -34,6 +34,20 @@ export function formatCurrency(value: string | number | null | undefined): strin
   return currencyFormatter.format(numeric);
 }
 
+/**
+ * Formats an amount in millions, as the dashboard design does: `$6872.4M`.
+ *
+ * Always millions with one decimal — never scaled up to billions — because the
+ * design's KPI row compares four figures side by side, and a unit that changes
+ * with magnitude makes them unreadable at a glance.
+ */
+export function formatMillions(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "$0.0M";
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return "$0.0M";
+  return `$${(numeric / 1_000_000).toFixed(1)}M`;
+}
+
 /** Formats a min/max pair as a range, tolerating either bound being absent. */
 export function formatCurrencyRange(
   min: string | number | null | undefined,

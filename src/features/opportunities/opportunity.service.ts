@@ -11,10 +11,14 @@ import type {
   UpdateOpportunityStatusInput,
 } from "@/features/opportunities/opportunity.schemas";
 import type {
+  DashboardDeadlineDto,
+  DashboardDeadlinesDto,
+  DashboardOpportunityDto,
   OpportunityDashboardStats,
   OpportunityDetailDto,
   OpportunityListResult,
   OpportunitySummaryDto,
+  PipelineStageDto,
 } from "@/features/opportunities/opportunity.types";
 import { OpportunityStatus } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/api/errors";
@@ -210,20 +214,213 @@ export async function updateOpportunityStatus(
   return toDetailDto(row);
 }
 
+/**
+ * Lifecycle phases of the dashboard's pipeline panel.
+ *
+ * Four buckets over ten workflow statuses, matching the design's Capture →
+ * Proposal → Submitted → Awarded progression. Declared here rather than in the
+ * page so the phase definition and the value sums cannot drift apart.
+ */
+const PIPELINE_STAGES: Array<{ name: string; statuses: OpportunityStatus[] }> = [
+  {
+    name: "Capture",
+    statuses: [
+      OpportunityStatus.NEW,
+      OpportunityStatus.MATCHED,
+      OpportunityStatus.REVIEWING,
+      OpportunityStatus.INTERESTED,
+    ],
+  },
+  {
+    name: "Proposal",
+    statuses: [OpportunityStatus.PURSUING, OpportunityStatus.PROPOSAL_IN_PROGRESS],
+  },
+  { name: "Submitted", statuses: [OpportunityStatus.SUBMITTED] },
+  { name: "Awarded", statuses: [OpportunityStatus.WON] },
+];
+
+/** Statuses excluded from "open" pipeline figures. */
+const CLOSED_STATUSES: OpportunityStatus[] = [
+  OpportunityStatus.WON,
+  OpportunityStatus.LOST,
+  OpportunityStatus.PASSED,
+];
+
+/** A submitted bid at or above this probability counts toward the award forecast. */
+export const AWARD_FORECAST_THRESHOLD = 60;
+
+/** How far ahead the award forecast looks for an expected decision. */
+export const AWARD_FORECAST_DAYS = 90;
+
+/** Rows shown per deadline urgency column, and per awards list. */
+const PANEL_LIST_SIZE = 3;
+
+/**
+ * Sums decimal strings exactly.
+ *
+ * Money is `Decimal(14,2)` in the database and crosses this boundary as a string
+ * precisely so it never becomes a float. Adding in cents keeps that guarantee:
+ * `Number` on the whole amount would reintroduce the rounding the schema avoids.
+ */
+function sumMoney(values: string[]): string {
+  const cents = values.reduce((total, value) => total + Math.round(Number(value) * 100), 0);
+  return (cents / 100).toFixed(2);
+}
+
+function divideMoney(total: string, divisor: number): string {
+  if (divisor <= 0) return "0.00";
+  return (Math.round(Number(total) * 100) / divisor / 100).toFixed(2);
+}
+
+/** COALESCE(max, min) — the single figure the dashboard treats as contract value. */
+function coalesceValue(row: {
+  estimatedValueMax: unknown;
+  estimatedValueMin: unknown;
+}): string | null {
+  const candidate = row.estimatedValueMax ?? row.estimatedValueMin;
+  return candidate === null || candidate === undefined ? null : String(candidate);
+}
+
+function toDashboardDto(row: {
+  id: string;
+  title: string;
+  agency: string | null;
+  estimatedValueMax: unknown;
+  estimatedValueMin: unknown;
+  probabilityOfWin?: number | null;
+}): DashboardOpportunityDto {
+  return {
+    id: row.id,
+    title: row.title,
+    agency: row.agency,
+    value: coalesceValue(row),
+    probabilityOfWin: row.probabilityOfWin ?? null,
+  };
+}
+
+/**
+ * Buckets deadlines by urgency relative to `now`.
+ *
+ * "This week" is the next seven days from the start of today, so an item due later
+ * today is this week rather than overdue.
+ */
+function bucketDeadlines(
+  rows: Array<{
+    id: string;
+    title: string;
+    agency: string | null;
+    responseDeadline: Date | null;
+    status: OpportunityStatus;
+  }>,
+  now: Date,
+): DashboardDeadlinesDto {
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekAhead = new Date(startOfToday.getTime() + 7 * 86_400_000);
+
+  const overdue: DashboardDeadlineDto[] = [];
+  const thisWeek: DashboardDeadlineDto[] = [];
+  const upcoming: DashboardDeadlineDto[] = [];
+
+  for (const row of rows) {
+    if (!row.responseDeadline) continue;
+
+    const dto: DashboardDeadlineDto = {
+      id: row.id,
+      title: row.title,
+      agency: row.agency,
+      deadline: row.responseDeadline.toISOString(),
+      status: row.status,
+    };
+
+    if (row.responseDeadline < startOfToday) overdue.push(dto);
+    else if (row.responseDeadline < weekAhead) thisWeek.push(dto);
+    else upcoming.push(dto);
+  }
+
+  return {
+    overdue: overdue.slice(0, PANEL_LIST_SIZE),
+    thisWeek: thisWeek.slice(0, PANEL_LIST_SIZE),
+    upcoming: upcoming.slice(0, PANEL_LIST_SIZE),
+    overdueTotal: overdue.length,
+    thisWeekTotal: thisWeek.length,
+  };
+}
+
 export async function getDashboardStats(now: Date = new Date()): Promise<OpportunityDashboardStats> {
   await requireSession();
 
-  const [byStatus, strongMatchCount, closingSoonCount] = await Promise.all([
-    repository.countOpportunitiesByStatus(),
-    repository.countStrongMatches(STRONG_MATCH_THRESHOLD),
-    repository.countClosingSoon(now, CLOSING_SOON_DAYS),
-  ]);
+  const [aggregates, strongMatchCount, closingSoonCount, recentAwards, awardForecast, deadlineRows] =
+    await Promise.all([
+      repository.aggregateByStatus(),
+      repository.countStrongMatches(STRONG_MATCH_THRESHOLD),
+      repository.countClosingSoon(now, CLOSING_SOON_DAYS),
+      repository.findRecentAwards(PANEL_LIST_SIZE),
+      repository.findAwardForecast(
+        now,
+        AWARD_FORECAST_DAYS,
+        AWARD_FORECAST_THRESHOLD,
+        PANEL_LIST_SIZE,
+      ),
+      // Deliberately capped: the panel shows three per column, and a pathological
+      // backlog must not turn the dashboard into a full table scan.
+      repository.findOpenDeadlines(200),
+    ]);
+
+  const byStatus = Object.fromEntries(
+    Object.values(OpportunityStatus).map((status) => [status, 0]),
+  ) as Record<OpportunityStatus, number>;
+  const valueByStatus = Object.fromEntries(
+    Object.values(OpportunityStatus).map((status) => [status, "0.00"]),
+  ) as Record<OpportunityStatus, string>;
+
+  let pipelineValue = "0.00";
+  let weightedValue = "0.00";
+  let activeCount = 0;
+  let pricedCount = 0;
+
+  for (const row of aggregates) {
+    byStatus[row.status] = row.count;
+    valueByStatus[row.status] = row.value;
+
+    if (!CLOSED_STATUSES.includes(row.status)) {
+      pipelineValue = sumMoney([pipelineValue, row.value]);
+      weightedValue = sumMoney([weightedValue, row.weightedValue]);
+      activeCount += row.count;
+      pricedCount += row.pricedCount;
+    }
+  }
+
+  const wonCount = byStatus[OpportunityStatus.WON];
+  const lostCount = byStatus[OpportunityStatus.LOST];
+  const decidedCount = wonCount + lostCount;
+
+  const stages: PipelineStageDto[] = PIPELINE_STAGES.map((stage) => ({
+    name: stage.name,
+    value: sumMoney(stage.statuses.map((status) => valueByStatus[status])),
+    count: stage.statuses.reduce((total, status) => total + byStatus[status], 0),
+  }));
 
   return {
-    newCount: byStatus[OpportunityStatus.NEW] ?? 0,
+    newCount: byStatus[OpportunityStatus.NEW],
     strongMatchCount,
-    pursuingCount: byStatus[OpportunityStatus.PURSUING] ?? 0,
-    submittedCount: byStatus[OpportunityStatus.SUBMITTED] ?? 0,
+    pursuingCount: byStatus[OpportunityStatus.PURSUING],
+    submittedCount: byStatus[OpportunityStatus.SUBMITTED],
     closingSoonCount,
+    byStatus,
+
+    pipelineValue,
+    weightedValue,
+    averageDealSize: divideMoney(pipelineValue, activeCount),
+    activeCount,
+    pricedCount,
+    wonCount,
+    lostCount,
+    // Null, not zero: nothing decided is not the same as never winning.
+    winRate: decidedCount === 0 ? null : (wonCount / decidedCount) * 100,
+
+    stages,
+    recentAwards: recentAwards.map(toDashboardDto),
+    awardForecast: awardForecast.map(toDashboardDto),
+    deadlines: bucketDeadlines(deadlineRows, now),
   };
 }

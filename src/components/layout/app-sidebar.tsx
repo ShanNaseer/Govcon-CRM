@@ -2,16 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Landmark } from "lucide-react";
+import { Target } from "lucide-react";
 
 import { NAV_SECTIONS, type NavItem } from "@/components/layout/nav-config";
+import { UserMenu } from "@/components/layout/user-menu";
 import { cn } from "@/lib/utils";
 
 /**
- * Primary navigation.
+ * Primary navigation, styled to the Figma design: 16rem white rail, grouped
+ * sections with slate headings, icon + label rows, and a solid brand fill on the
+ * active item.
  *
- * Client Component solely because active-link highlighting needs `usePathname`.
- * The nav model itself is static data imported from a plain module.
+ * Off-canvas below `lg` — it slides in over a scrim rather than reserving width,
+ * which is what the design specifies for small screens. The open state is owned
+ * by `AppShell` because the header's hamburger toggles it too.
  */
 
 function isActive(pathname: string, item: NavItem): boolean {
@@ -20,65 +24,101 @@ function isActive(pathname: string, item: NavItem): boolean {
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
-export function AppSidebar({ appName }: { appName: string }) {
+export function AppSidebar({
+  appName,
+  userEmail,
+  userName,
+  userRole,
+  mobileOpen,
+  onNavigate,
+}: {
+  appName: string;
+  userEmail: string;
+  userName?: string;
+  userRole?: string;
+  mobileOpen: boolean;
+  onNavigate: () => void;
+}) {
   const pathname = usePathname();
 
   return (
-    <nav
-      aria-label="Main navigation"
-      className="flex h-full w-60 shrink-0 flex-col border-r border-line bg-surface"
+    <aside
+      className={cn(
+        "fixed inset-y-0 left-0 z-40 w-64 shrink-0 border-r border-line bg-surface",
+        "transition-transform duration-200 ease-in-out lg:static lg:translate-x-0",
+        mobileOpen ? "translate-x-0" : "-translate-x-full",
+      )}
     >
-      <div className="flex h-14 items-center gap-2 border-b border-line px-4">
-        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-white">
-          <Landmark className="h-4 w-4" aria-hidden />
-        </span>
-        <span className="truncate text-sm font-semibold text-ink">{appName}</span>
+      <div className="flex h-full flex-col">
+        <div className="flex h-16 shrink-0 items-center gap-2 border-b border-line px-4">
+          <span
+            aria-hidden
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-white"
+          >
+            <Target className="h-5 w-5" />
+          </span>
+          <span className="truncate text-lg font-semibold text-ink">{appName}</span>
+        </div>
+
+        <nav aria-label="Main navigation" className="flex-1 space-y-6 overflow-y-auto p-4">
+          {NAV_SECTIONS.map((section, sectionIndex) => (
+            <div key={section.title ?? `section-${sectionIndex}`}>
+              {section.title ? (
+                <p className="mb-2 px-3 text-[12px] font-semibold text-ink-subtle">{section.title}</p>
+              ) : null}
+
+              <ul className="space-y-1">
+                {section.items.map((item) => {
+                  const active = isActive(pathname, item);
+                  const Icon = item.icon;
+
+                  return (
+                    <li key={`${section.title ?? "top"}-${item.label}`}>
+                      {item.implemented ? (
+                        <Link
+                          href={item.href}
+                          onClick={onNavigate}
+                          aria-current={active ? "page" : undefined}
+                          className={cn(
+                            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                            active ? "bg-brand text-white" : "text-ink-muted hover:bg-canvas hover:text-ink",
+                          )}
+                        >
+                          <Icon className="h-5 w-5 shrink-0" aria-hidden />
+                          <span className="flex-1 truncate">{item.label}</span>
+                          {item.badge ? (
+                            <span
+                              className={cn(
+                                "ml-auto rounded-full px-2 py-0.5 text-xs font-medium",
+                                active ? "bg-white/20 text-white" : "bg-accent text-white",
+                              )}
+                            >
+                              {item.badge}
+                            </span>
+                          ) : null}
+                        </Link>
+                      ) : (
+                        <span
+                          aria-disabled="true"
+                          title="Not implemented in this release"
+                          className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-ink-subtle"
+                        >
+                          <Icon className="h-5 w-5 shrink-0" aria-hidden />
+                          <span className="flex-1 truncate">{item.label}</span>
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </nav>
+
+        <div className="shrink-0 border-t border-line p-4">
+          <UserMenu email={userEmail} name={userName} role={userRole} />
+        </div>
       </div>
-
-      <div className="flex-1 overflow-y-auto px-2 py-3">
-        {NAV_SECTIONS.map((section, sectionIndex) => (
-          <div key={section.title ?? `section-${sectionIndex}`} className="mb-4 last:mb-0">
-            {section.title ? (
-              <p className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-ink-subtle uppercase">
-                {section.title}
-              </p>
-            ) : null}
-
-            <ul className="space-y-0.5">
-              {section.items.map((item) => {
-                const active = isActive(pathname, item);
-
-                return (
-                  <li key={`${section.title ?? "top"}-${item.label}`}>
-                    {item.implemented ? (
-                      <Link
-                        href={item.href}
-                        aria-current={active ? "page" : undefined}
-                        className={cn(
-                          "block rounded-md px-2 py-1.5 text-sm transition-colors",
-                          active
-                            ? "bg-brand-soft font-medium text-brand"
-                            : "text-ink-muted hover:bg-canvas hover:text-ink",
-                        )}
-                      >
-                        {item.label}
-                      </Link>
-                    ) : (
-                      <span
-                        aria-disabled="true"
-                        title="Not implemented in this release"
-                        className="block cursor-not-allowed rounded-md px-2 py-1.5 text-sm text-ink-subtle"
-                      >
-                        {item.label}
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
-      </div>
-    </nav>
+    </aside>
   );
 }

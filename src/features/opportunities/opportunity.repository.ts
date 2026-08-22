@@ -171,3 +171,101 @@ export async function countClosingSoon(now: Date, withinDays: number): Promise<n
     },
   });
 }
+
+/**
+ * Per-status contract value and weighted value, for the dashboard's pipeline panel.
+ *
+ * Raw SQL because the figure is `COALESCE(max, min)` — an expression Prisma's
+ * `groupBy` cannot aggregate — and because summing in JavaScript would mean
+ * loading every row to add up four numbers.
+ *
+ * Sums are cast to text: `numeric` arrives as a driver-specific type, and text
+ * keeps full precision on the way to the Decimal-aware formatter.
+ */
+export type StatusAggregateRow = {
+  status: OpportunityStatus;
+  count: number;
+  /** Σ COALESCE(estimatedValueMax, estimatedValueMin) — unpriced rows contribute 0. */
+  value: string;
+  /** Σ value × probabilityOfWin/100 — an unassessed probability contributes 0. */
+  weightedValue: string;
+  /** Rows carrying a usable value, so the UI can say how complete the figure is. */
+  pricedCount: number;
+};
+
+export async function aggregateByStatus(): Promise<StatusAggregateRow[]> {
+  return prisma.$queryRaw<StatusAggregateRow[]>(Prisma.sql`
+    SELECT
+      "status",
+      COUNT(*)::int AS "count",
+      COALESCE(SUM(COALESCE("estimatedValueMax", "estimatedValueMin")), 0)::text AS "value",
+      COALESCE(
+        SUM(
+          COALESCE("estimatedValueMax", "estimatedValueMin")
+            * COALESCE("probabilityOfWin", 0) / 100.0
+        ),
+        0
+      )::text AS "weightedValue",
+      COUNT(COALESCE("estimatedValueMax", "estimatedValueMin"))::int AS "pricedCount"
+    FROM "Opportunity"
+    GROUP BY "status"
+  `);
+}
+
+/** Most recently awarded opportunities, for the dashboard's awards panel. */
+export async function findRecentAwards(take: number) {
+  return prisma.opportunity.findMany({
+    where: { status: OpportunityStatus.WON },
+    orderBy: { updatedAt: "desc" },
+    take,
+    select: { id: true, title: true, agency: true, estimatedValueMax: true, estimatedValueMin: true },
+  });
+}
+
+/**
+ * Submitted bids likely to be awarded: a decision expected inside `withinDays` and
+ * an assessed probability at or above `minProbability`.
+ */
+export async function findAwardForecast(
+  now: Date,
+  withinDays: number,
+  minProbability: number,
+  take: number,
+) {
+  return prisma.opportunity.findMany({
+    where: {
+      status: OpportunityStatus.SUBMITTED,
+      probabilityOfWin: { gte: minProbability },
+      responseDeadline: { lte: new Date(now.getTime() + withinDays * 86_400_000) },
+    },
+    orderBy: { probabilityOfWin: "desc" },
+    take,
+    select: {
+      id: true,
+      title: true,
+      agency: true,
+      probabilityOfWin: true,
+      estimatedValueMax: true,
+      estimatedValueMin: true,
+    },
+  });
+}
+
+/**
+ * Open opportunities with a deadline, ordered soonest first, for the deadline panel.
+ * Bucketing into overdue / this week / upcoming happens in the service, where the
+ * clock is already injected.
+ */
+export async function findOpenDeadlines(take: number) {
+  return prisma.opportunity.findMany({
+    where: {
+      responseDeadline: { not: null },
+      status: {
+        notIn: [OpportunityStatus.PASSED, OpportunityStatus.LOST, OpportunityStatus.WON],
+      },
+    },
+    orderBy: { responseDeadline: "asc" },
+    take,
+    select: { id: true, title: true, agency: true, responseDeadline: true, status: true },
+  });
+}

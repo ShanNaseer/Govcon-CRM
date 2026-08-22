@@ -265,26 +265,69 @@ Codes: `VALIDATION_ERROR`, `NOT_FOUND`, `CONFLICT`, `UNAUTHORIZED`, `FORBIDDEN`,
 Stack traces, SQL, connection strings and AWS metadata are never returned; they
 go to the structured log, which redacts sensitive keys.
 
+## Schema changes and the dev server
+
+`prisma generate` writes the client into `src/generated/prisma`, and Turbopack
+caches those compiled modules. Hot reload does **not** rebuild them, and the
+Prisma client instance is held in a `globalThis` singleton that survives HMR by
+design (see `src/lib/db/prisma.ts`).
+
+So after any schema change, a hot-reloaded dev server keeps using the previous
+client and fails with `Unknown argument \`yourNewField\`` even though the migration
+is applied and the column exists. Restart with the cache cleared:
+
+```bash
+npm run dev:fresh
+```
+
+That removes `.next`, regenerates the client, and starts `next dev`. A plain
+restart of `npm run dev` usually suffices; `dev:fresh` is the one that always does.
+
 ## Authentication
 
-**Not implemented, and the application fails closed.**
+Email and password against the application's own `User` table, with server-side
+sessions. `src/lib/auth/session.ts` is the single seam.
 
-`src/lib/auth/session.ts` is the single seam where a provider is wired in. No
-custom password handling has been invented.
+**How it works**
 
-- In **development**, `getSession()` returns a placeholder identity so the app is
-  usable locally.
-- In **production**, it returns `null`. API routes then return `401`, and the
-  dashboard renders "Authentication is not configured" instead of data.
+- Passwords are hashed with scrypt from Node's standard library (`src/lib/auth/password.ts`).
+  The stored string carries its own cost parameters, so they can be raised later
+  without invalidating existing hashes — `needsRehash` upgrades them on next sign-in.
+- A session is a row in `Session`; the cookie holds an opaque 256-bit token and the
+  table stores only its SHA-256. Signing out or deactivating a user therefore takes
+  effect immediately, which a self-contained JWT cannot offer.
+- The cookie is `httpOnly`, `sameSite=lax`, `secure` in production, with a 7-day
+  absolute lifetime (not sliding — cookies cannot be re-issued during rendering).
+- Sign-in attempts are throttled per email address. The throttle is in-process, so
+  it must move to Redis or the database before running more than one instance.
 
-The authorization check lives in the **service layer**, not just the dashboard
-layout. This is deliberate: a Server Component's data is serialized into the RSC
-payload even when a parent layout declines to render it, so a layout-only check
-leaks records. The check sits next to the data access, which is the boundary that
-actually holds.
+**Where it is enforced**
 
-Before deploying, wire a provider into `getSession()` and replace the production
-`null` with a real lookup.
+The check lives in the **service layer**, not just the dashboard layout. This is
+deliberate, and Next.js documents why: a layout does not re-render on client-side
+navigation and does not stop nested segments from rendering, so a layout-only check
+leaks records into the RSC payload. Every function in `src/features/**/*.service.ts`
+calls `requireSession()` before touching the database.
+
+| Call site | Function | Behaviour when unauthenticated |
+| --------- | -------- | ------------------------------ |
+| Feature services | `requireSession()` | throws `UNAUTHORIZED` |
+| API route handlers | `requireSession()` | `401` |
+| Pages and dashboard layout | `requireUser()` | redirect to `/login` |
+
+**Creating users**
+
+There is no self-serve sign-up; accounts are provisioned by an operator:
+
+```bash
+npm run user:create -- --email you@example.com --name "Your Name" --role ADMIN
+```
+
+The password is read from `PASSWORD` or prompted for without echo — never passed as
+an argument, which would leave it in shell history and the process list. Roles are
+`ADMIN`, `MANAGER` and `MEMBER`; the first two see every client, while a `MEMBER` is
+limited to `--clients <id,id>` and sees nothing without it. Re-running for an
+existing address resets that user's password and revokes their sessions.
 
 ## Folder structure
 
@@ -339,6 +382,7 @@ docs/         architecture and database documentation
 - S3 service with presigned URLs and key-scope enforcement
 - Structured logging with redaction, and a consistent API error contract
 - Initial Prisma migration and a development seed
+- Email/password authentication with server-side sessions and protected routes
 
 **Not implemented (deliberate extension points)**
 
@@ -347,7 +391,7 @@ docs/         architecture and database documentation
 - PDF parsing, OCR, Textract
 - Proposal generation, notifications, billing, multi-tenancy
 - Lambda / EventBridge / SQS deployment
-- Authentication provider
+- Password reset, MFA, SSO, and a user-management UI (users are created by CLI)
 - Client create/edit forms (the API supports both; the UI does not yet)
 
 Sidebar entries and detail tabs for unbuilt modules render **disabled** rather

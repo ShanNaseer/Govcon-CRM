@@ -3,44 +3,62 @@
 /**
  * Design tokens for the internal CRM shell.
  *
- * Deliberately a light, high-density enterprise palette: a cool grey page, white
- * content surfaces, and one navy accent. The spec calls for a government
- * contracting look, so no gradients or decorative effects — the dark-mode block
- * the starter shipped with is intentionally removed in favour of a single
- * predictable appearance for an internal tool.
+ * These values are the Figma design's palette, transcribed from the reference
+ * implementation. That prototype hard-coded its hexes at every call site
+ * (`bg-[#4A90E2]`, `text-[#8E96AC]`, …); here they live once as tokens so the
+ * whole app is restyled from this block and pages stay free of raw colour.
+ *
+ * Light-only by design: an internal tool with one predictable appearance, so
+ * the dark-mode block the starter shipped with is intentionally absent.
  */
 
 @theme {
-  /* Surfaces */
-  --color-canvas: #f6f7f9;
+  /* Surfaces — gray-50 page behind white panels, per the design. */
+  --color-canvas: #f9fafb;
   --color-surface: #ffffff;
-  --color-surface-muted: #fafbfc;
+  --color-surface-muted: #f3f4f6;
 
-  /* Borders */
-  --color-line: #e3e6ea;
-  --color-line-strong: #cdd3da;
+  /* Borders — the design's 1px rgba(0,0,0,0.1) hairline. */
+  --color-line: #e5e5e5;
+  --color-line-strong: #d1d5db;
 
-  /* Text */
-  --color-ink: #10151c;
-  --color-ink-muted: #5b6673;
-  --color-ink-subtle: #8a94a1;
+  /* Text — the design's near-black headings over a warm slate for secondary copy. */
+  --color-ink: #0a0a0a;
+  --color-ink-muted: #717182;
+  /* The design's distinct slate used for sidebar section headings. */
+  --color-ink-subtle: #8e96ac;
+  /* Page-header description colour, one step cooler than --color-ink-muted. */
+  --color-ink-faint: #8891a5;
 
-  /* Brand accent */
-  --color-brand: #1e3a5f;
-  --color-brand-hover: #16304f;
-  --color-brand-soft: #eef2f7;
+  /* Brand accent — the design's primary blue. */
+  --color-brand: #4a90e2;
+  --color-brand-hover: #3a7bc8;
+  --color-brand-soft: #eff6ff;
+  /* Pale end of the design's logo gradient. */
+  --color-brand-light: #81cffa;
+
+  /* Coral accent, used for notification counts in the sidebar. */
+  --color-accent: #ff6f62;
 
   /* Status */
   --color-positive: #146c43;
   --color-positive-soft: #e7f4ec;
   --color-warning: #8a5a00;
   --color-warning-soft: #fdf3e2;
-  --color-critical: #a12b2b;
-  --color-critical-soft: #fbecec;
+  --color-critical: #dc2626;
+  --color-critical-soft: #fef2f2;
   --color-info: #1d4ed8;
   --color-info-soft: #eaf0fe;
 
-  --radius-card: 0.5rem;
+  /* Radii. The design's shadcn Card is `rounded-xl` (12px); its hand-built
+   * dashboard panels use 14px and their inner tiles 10px. */
+  --radius-card: 0.75rem;
+  --radius-panel: 0.875rem;
+  --radius-tile: 0.625rem;
+
+  /* Neutral fill behind the stage tiles and stat chips in the dashboard panels. */
+  --color-tile: #f7f9fc;
+  --color-tile-track: #e7ebf0;
 }
 
 html {
@@ -50,6 +68,7 @@ html {
 body {
   background-color: var(--color-canvas);
   color: var(--color-ink);
+  /* Inter, matching the design, which loads it from Google Fonts. */
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }

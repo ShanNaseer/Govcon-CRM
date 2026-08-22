@@ -4,7 +4,13 @@ import { ChevronRight } from "lucide-react";
 
 export type Breadcrumb = { label: string; href?: string };
 
-/** Title block shown at the top of every page, with optional breadcrumbs and actions. */
+/**
+ * Title block shown at the top of every page, with optional breadcrumbs and actions.
+ *
+ * Type scale follows the Figma design: a 22px bold title over a 13px slate
+ * description, constrained so the description wraps into a short block rather than
+ * running the full width of a wide screen.
+ */
 export function PageHeader({
   title,
   description,
@@ -17,7 +23,7 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="mb-5">
+    <div className="mb-6">
       {breadcrumbs && breadcrumbs.length > 0 ? (
         <nav aria-label="Breadcrumb" className="mb-1.5">
           <ol className="flex flex-wrap items-center gap-1 text-xs text-ink-muted">
@@ -39,8 +45,10 @@ export function PageHeader({
 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold text-ink">{title}</h1>
-          {description ? <p className="mt-0.5 text-sm text-ink-muted">{description}</p> : null}
+          <h1 className="truncate text-[22px] font-bold text-ink">{title}</h1>
+          {description ? (
+            <p className="mt-1 max-w-[46ch] text-[13px] text-ink-subtle">{description}</p>
+          ) : null}
         </div>
         {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
       </div>

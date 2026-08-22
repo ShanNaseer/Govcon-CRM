@@ -71,6 +71,14 @@ enum MatchStatus {
   DISMISSED
 }
 
+/// Application role. Coarse-grained on purpose: per-client scoping is a separate
+/// concern, handled by User.clientScope.
+enum UserRole {
+  ADMIN
+  MANAGER
+  MEMBER
+}
+
 // ---------------------------------------------------------------------------
 // Client (a company profile used for opportunity matching)
 // ---------------------------------------------------------------------------
@@ -100,15 +108,15 @@ model Client {
   minContractValue      Decimal? @db.Decimal(14, 2)
   maxContractValue      Decimal? @db.Decimal(14, 2)
 
-  naicsCodes       ClientNaicsCode[]
-  pscCodes         ClientPscCode[]
-  capabilities     ClientCapability[]
-  keywords         ClientKeyword[]
-  certifications   ClientCertification[]
-  setAsides        ClientSetAside[]
-  contractVehicles ClientContractVehicle[]
+  naicsCodes        ClientNaicsCode[]
+  pscCodes          ClientPscCode[]
+  capabilities      ClientCapability[]
+  keywords          ClientKeyword[]
+  certifications    ClientCertification[]
+  setAsides         ClientSetAside[]
+  contractVehicles  ClientContractVehicle[]
   preferredAgencies ClientPreferredAgency[]
-  matches          OpportunityMatch[]
+  matches           OpportunityMatch[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -258,12 +266,17 @@ model Opportunity {
   estimatedValueMin Decimal? @db.Decimal(14, 2)
   estimatedValueMax Decimal? @db.Decimal(14, 2)
 
+  /// Capture manager's probability of win, 0-100. Null until someone assesses it,
+  /// which is distinct from 0 — the dashboard's weighted pipeline treats an
+  /// unassessed opportunity as contributing nothing rather than as a certain loss.
+  probabilityOfWin Int?
+
   placeCity    String?
   placeState   String?
   placeCountry String?
 
   /// Internal workflow status.
-  status OpportunityStatus @default(NEW)
+  status       OpportunityStatus @default(NEW)
   /// Publication status as reported by the source system (e.g. "active", "archived").
   sourceStatus String?
 
@@ -369,4 +382,65 @@ model OpportunityMatch {
   @@index([clientId, overallScore])
   @@index([opportunityId])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Authentication (application users and their server-side sessions)
+// ---------------------------------------------------------------------------
+
+model User {
+  id    String @id @default(cuid())
+  email String @unique
+  name  String
+
+  /// Opaque, self-describing digest produced by src/lib/auth/password.ts.
+  /// Never a raw or reversibly-encoded password.
+  passwordHash String
+
+  role UserRole @default(MEMBER)
+
+  /// Disabling a user blocks sign-in and invalidates existing sessions without
+  /// destroying the audit trail a deletion would take with it.
+  isActive Boolean @default(true)
+
+  /// Per-client authorization. `allClients` grants unrestricted access; otherwise
+  /// only the Clients listed in `clientIds` are visible. Default is deny-all, so a
+  /// user created without explicit scope sees nothing rather than everything.
+  allClients Boolean  @default(false)
+  clientIds  String[] @default([])
+
+  lastLoginAt DateTime?
+
+  sessions Session[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+}
+
+/// Server-side session. Sessions are stored rather than signed into the cookie so
+/// that sign-out and user deactivation take effect immediately.
+model Session {
+  id String @id @default(cuid())
+
+  /// SHA-256 of the session token. The token itself exists only in the client's
+  /// cookie, so a database disclosure does not hand over usable sessions.
+  tokenHash String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime
+
+  /// Coarse request provenance, kept for audit. Not used for authorization: both
+  /// values are client-controlled and trivially spoofed.
+  userAgent String?
+  ipAddress String?
+
+  createdAt    DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }

@@ -1,7 +1,7 @@
 /**
  * DEVELOPMENT SEED — do not run against a production database.
  *
- * Inserts two clearly fictional clients and three fictional opportunities so the
+ * Inserts two clearly fictional clients and five fictional opportunities so the
  * dashboard has something to render locally. The application is designed to work
  * with an empty database; this is a convenience, not a requirement.
  *
@@ -137,6 +137,7 @@ async function main(): Promise<void> {
       contractType: "Firm Fixed Price",
       estimatedValueMin: "1200000.00",
       estimatedValueMax: "6500000.00",
+      probabilityOfWin: 65,
       placeCity: "Washington",
       placeState: "DC",
       placeCountry: "USA",
@@ -161,6 +162,7 @@ async function main(): Promise<void> {
       contractType: "Time and Materials",
       estimatedValueMin: "300000.00",
       estimatedValueMax: "900000.00",
+      probabilityOfWin: 40,
       placeState: "OR",
       placeCountry: "USA",
       status: OpportunityStatus.NEW,
@@ -184,6 +186,54 @@ async function main(): Promise<void> {
       status: OpportunityStatus.NEW,
       sourceStatus: "active",
       naicsCodes: { create: [{ code: "561730", isPrimary: true }] },
+    },
+  });
+
+  // Two further records so the dashboard exercises the later lifecycle stages:
+  // without a submitted and an awarded opportunity, the pipeline panel, the award
+  // forecast and the win-rate figure all render empty and cannot be eyeballed.
+  await prisma.opportunity.create({
+    data: {
+      source: OpportunitySourceType.MANUAL,
+      externalId: "SEED-0004",
+      title: "Cybersecurity Operations Center Support",
+      description: "Fictional sample record used for local development.",
+      solicitationNumber: "SEED-RFP-2026-0004",
+      agency: "Department of Homeland Security",
+      postedDate: daysFromNow(-45),
+      responseDeadline: daysFromNow(30),
+      setAside: "Small Business",
+      contractType: "Cost Plus Fixed Fee",
+      estimatedValueMin: "4000000.00",
+      estimatedValueMax: "9500000.00",
+      probabilityOfWin: 72,
+      placeState: "VA",
+      placeCountry: "USA",
+      status: OpportunityStatus.SUBMITTED,
+      sourceStatus: "active",
+      naicsCodes: { create: [{ code: "541512", isPrimary: true }] },
+    },
+  });
+
+  await prisma.opportunity.create({
+    data: {
+      source: OpportunitySourceType.MANUAL,
+      externalId: "SEED-0005",
+      title: "Logistics Modernization and Sustainment",
+      description: "Fictional sample record used for local development.",
+      solicitationNumber: "SEED-RFP-2026-0005",
+      agency: "Department of Defense",
+      postedDate: daysFromNow(-120),
+      responseDeadline: daysFromNow(-60),
+      contractType: "IDIQ",
+      estimatedValueMin: "2500000.00",
+      estimatedValueMax: "3200000.00",
+      probabilityOfWin: 100,
+      placeState: "MD",
+      placeCountry: "USA",
+      status: OpportunityStatus.WON,
+      sourceStatus: "awarded",
+      naicsCodes: { create: [{ code: "541614", isPrimary: true }] },
     },
   });
 
@@ -218,7 +268,16 @@ async function main(): Promise<void> {
     ],
   });
 
-  console.log("Seed complete: 2 clients, 3 opportunities, 2 matches.");
+  // Counted rather than hard-coded, so the summary cannot drift from the inserts.
+  const [clientCount, opportunityCount, matchCount] = await Promise.all([
+    prisma.client.count(),
+    prisma.opportunity.count(),
+    prisma.opportunityMatch.count(),
+  ]);
+
+  console.log(
+    `Seed complete: ${clientCount} clients, ${opportunityCount} opportunities, ${matchCount} matches.`,
+  );
 }
 
 main()

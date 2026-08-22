@@ -10,22 +10,54 @@ export function Card({ className, children }: { className?: string; children: Re
   );
 }
 
+/**
+ * Panel header.
+ *
+ * `size="lg"` is the Figma design's dashboard section heading — 20px semibold with
+ * a tinted leading icon. `size="md"` (the default) is the same composition one step
+ * down, for the denser field panels on the detail pages.
+ */
 export function CardHeader({
   title,
   description,
   action,
+  icon,
+  size = "md",
   className,
 }: {
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
+  /** Rendered before the title. Colour it at the call site to match the section. */
+  icon?: ReactNode;
+  size?: "md" | "lg";
   className?: string;
 }) {
+  const isLarge = size === "lg";
+
   return (
-    <div className={cn("flex items-start justify-between gap-4 border-b border-line px-4 py-3", className)}>
+    <div
+      className={cn(
+        "flex items-start justify-between gap-4 border-b border-line",
+        isLarge ? "px-6 py-4" : "px-4 py-3",
+        className,
+      )}
+    >
       <div className="min-w-0">
-        <h2 className="text-sm font-semibold text-ink">{title}</h2>
-        {description ? <p className="mt-0.5 text-xs text-ink-muted">{description}</p> : null}
+        <h2
+          className={cn(
+            "flex items-center gap-2 font-semibold text-ink",
+            isLarge ? "text-xl" : "text-base",
+          )}
+        >
+          {icon ? <span className="shrink-0">{icon}</span> : null}
+          <span className="min-w-0 truncate">{title}</span>
+        </h2>
+        {description ? (
+          <p className={cn("text-ink-muted", isLarge ? "mt-1 text-sm" : "mt-0.5 text-xs")}>
+            {description}
+          </p>
+        ) : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>
