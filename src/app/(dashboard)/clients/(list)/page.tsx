@@ -3,7 +3,7 @@ import { Building2, Plus } from "lucide-react";
 
 import { ClientFilters } from "@/components/clients/client-filters";
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button";
 import { ClientStatusBadge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState, ErrorState } from "@/components/ui/states";
@@ -32,10 +32,10 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
       title="Clients"
       description="Company profiles used to match government opportunities."
       actions={
-        <Button variant="primary" disabled title="Client creation UI is not implemented yet">
-          <Plus className="h-4 w-4" aria-hidden />
+        <ButtonLink href="/clients/new" variant="primary">
+          <Plus aria-hidden />
           Add Client
-        </Button>
+        </ButtonLink>
       }
     />
   );
