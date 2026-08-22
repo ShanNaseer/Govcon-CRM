@@ -35,12 +35,34 @@ const opportunitySummarySelect = {
   postedDate: true,
   responseDeadline: true,
   status: true,
+  contractType: true,
+  estimatedValueMin: true,
+  estimatedValueMax: true,
   naicsCodes: { select: { code: true, isPrimary: true } },
   matches: { select: { overallScore: true } },
 } satisfies Prisma.OpportunitySelect;
 
 export type OpportunityDetailRow = Prisma.OpportunityGetPayload<{ include: typeof opportunityDetailInclude }>;
 export type OpportunitySummaryRow = Prisma.OpportunityGetPayload<{ select: typeof opportunitySummarySelect }>;
+
+/**
+ * Sort order for the list.
+ *
+ * Only the orders expressible in SQL live here. `priority` and `fit-score` depend
+ * on the best match score, which is an aggregate over a relation that Prisma
+ * cannot order by — the service sorts those after fetching, so this falls back to
+ * the deadline order to keep the fetched window deterministic. See the note on
+ * `sortInMemory` in the service.
+ */
+function buildListOrderBy(
+  query: ListOpportunitiesQuery,
+): Prisma.OpportunityOrderByWithRelationInput[] {
+  if (query.sort === "newest") {
+    return [{ postedDate: { sort: "desc", nulls: "last" } }, { createdAt: "desc" }];
+  }
+
+  return [{ responseDeadline: { sort: "asc", nulls: "last" } }, { postedDate: "desc" }];
+}
 
 function buildListWhere(query: ListOpportunitiesQuery, now: Date): Prisma.OpportunityWhereInput {
   const filters: Prisma.OpportunityWhereInput[] = [];
@@ -85,7 +107,7 @@ export async function findManyOpportunities(
       where,
       select: opportunitySummarySelect,
       // Nulls last so undated records do not crowd out live solicitations.
-      orderBy: [{ responseDeadline: { sort: "asc", nulls: "last" } }, { postedDate: "desc" }],
+      orderBy: buildListOrderBy(query),
       take: query.take,
       skip: query.skip,
     }),

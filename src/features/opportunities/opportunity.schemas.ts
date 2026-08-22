@@ -84,8 +84,19 @@ export const updateOpportunityStatusSchema = z.object({
   status: z.enum(OpportunityStatus),
 });
 
+/** Derived urgency band shown on the inbox cards — see `derivePriority`. */
+export const opportunityPriorityValues = ["high", "medium", "low"] as const;
+
+/** Triage state: NEW is unreviewed, anything further along has been looked at. */
+export const opportunityReviewValues = ["unreviewed", "reviewed"] as const;
+
+export const opportunitySortValues = ["newest", "priority", "due-date", "fit-score"] as const;
+
 export const listOpportunitiesQuerySchema = z.object({
   search: optionalText(200),
+  priority: z.enum(opportunityPriorityValues).optional(),
+  review: z.enum(opportunityReviewValues).optional(),
+  sort: z.enum(opportunitySortValues).default("due-date"),
   source: z.enum(OpportunitySourceType).optional(),
   status: z.enum(OpportunityStatus).optional(),
   agency: optionalText(250),
@@ -103,3 +114,6 @@ export const opportunityIdSchema = z.string().trim().min(1).max(64);
 export type CreateOpportunityInput = z.infer<typeof createOpportunitySchema>;
 export type UpdateOpportunityStatusInput = z.infer<typeof updateOpportunityStatusSchema>;
 export type ListOpportunitiesQuery = z.infer<typeof listOpportunitiesQuerySchema>;
+export type OpportunityPriority = (typeof opportunityPriorityValues)[number];
+export type OpportunityReviewState = (typeof opportunityReviewValues)[number];
+export type OpportunitySort = (typeof opportunitySortValues)[number];

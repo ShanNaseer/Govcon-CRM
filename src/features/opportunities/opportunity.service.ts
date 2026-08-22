@@ -8,9 +8,13 @@ import * as repository from "@/features/opportunities/opportunity.repository";
 import type {
   CreateOpportunityInput,
   ListOpportunitiesQuery,
+  OpportunityPriority,
+  OpportunityReviewState,
+  OpportunitySort,
   UpdateOpportunityStatusInput,
 } from "@/features/opportunities/opportunity.schemas";
 import type {
+  OpportunityInboxStats,
   DashboardDeadlineDto,
   DashboardDeadlinesDto,
   DashboardOpportunityDto,
@@ -50,8 +54,41 @@ function bestScore(scores: Array<number | null>): number | null {
   return present.length > 0 ? Math.max(...present) : null;
 }
 
-function toSummaryDto(row: OpportunitySummaryRow): OpportunitySummaryDto {
+/**
+ * Urgency band for the inbox card, using the design's thresholds: a strong fit
+ * closing soon is high, a decent fit closing within the month is medium.
+ *
+ * An unscored opportunity is never high or medium — without a fit score there is
+ * no basis for the claim, and the design's own rule requires one.
+ */
+export function derivePriority(
+  fitScore: number | null,
+  deadline: Date | null,
+  now: Date,
+): OpportunityPriority {
+  if (fitScore === null || deadline === null) return "low";
+
+  const days = Math.ceil((deadline.getTime() - now.getTime()) / 86_400_000);
+
+  if (fitScore >= 80 && days <= 14) return "high";
+  if (fitScore >= 70 && days <= 30) return "medium";
+  return "low";
+}
+
+/** Rank used when ordering by priority. */
+const PRIORITY_RANK: Record<OpportunityPriority, number> = { high: 0, medium: 1, low: 2 };
+
+/** An opportunity is "new" for a week after it was posted. */
+const NEW_FOR_DAYS = 7;
+
+/** NEW is the untouched state; every later status means somebody has looked. */
+function deriveReviewState(status: OpportunityStatus): OpportunityReviewState {
+  return status === OpportunityStatus.NEW ? "unreviewed" : "reviewed";
+}
+
+function toSummaryDto(row: OpportunitySummaryRow, now: Date): OpportunitySummaryDto {
   const primary = row.naicsCodes.find((naics) => naics.isPrimary) ?? row.naicsCodes[0];
+  const bestMatchScore = bestScore(row.matches.map((match) => match.overallScore));
 
   return {
     id: row.id,
@@ -64,9 +101,17 @@ function toSummaryDto(row: OpportunitySummaryRow): OpportunitySummaryDto {
     postedDate: dateToIso(row.postedDate),
     responseDeadline: dateToIso(row.responseDeadline),
     status: row.status,
+    contractType: row.contractType,
+    estimatedValueMin: row.estimatedValueMin === null ? null : String(row.estimatedValueMin),
+    estimatedValueMax: row.estimatedValueMax === null ? null : String(row.estimatedValueMax),
     primaryNaicsCode: primary?.code ?? null,
-    bestMatchScore: bestScore(row.matches.map((match) => match.overallScore)),
+    bestMatchScore,
     matchCount: row.matches.length,
+    priority: derivePriority(bestMatchScore, row.responseDeadline, now),
+    reviewState: deriveReviewState(row.status),
+    isNew:
+      row.postedDate !== null &&
+      now.getTime() - row.postedDate.getTime() <= NEW_FOR_DAYS * 86_400_000,
   };
 }
 
@@ -151,6 +196,33 @@ function assertConsistentInput(input: CreateOpportunityInput): void {
   }
 }
 
+/**
+ * Applies the orders SQL cannot express.
+ *
+ * Priority and fit score both derive from the best match score, an aggregate over
+ * the `OpportunityMatch` relation that Prisma cannot order by. Sorting here orders
+ * the fetched page rather than the whole table, which is correct while a page holds
+ * everything and approximate once it does not. Denormalizing the best score onto
+ * `Opportunity` would move both orders into SQL; that is the fix if this list grows
+ * past one page.
+ */
+function sortInMemory(items: OpportunitySummaryDto[], sort: OpportunitySort): OpportunitySummaryDto[] {
+  if (sort === "priority") {
+    return [...items].sort(
+      (a, b) =>
+        PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] ||
+        (b.bestMatchScore ?? -1) - (a.bestMatchScore ?? -1),
+    );
+  }
+
+  if (sort === "fit-score") {
+    // Unscored records sort last rather than as zero — see MatchScoreBadge.
+    return [...items].sort((a, b) => (b.bestMatchScore ?? -1) - (a.bestMatchScore ?? -1));
+  }
+
+  return items;
+}
+
 export async function listOpportunities(
   query: ListOpportunitiesQuery,
   now: Date = new Date(),
@@ -159,7 +231,49 @@ export async function listOpportunities(
 
   const { rows, total } = await repository.findManyOpportunities(query, now);
 
-  return { items: rows.map(toSummaryDto), total, take: query.take, skip: query.skip };
+  let items = rows.map((row) => toSummaryDto(row, now));
+
+  // Derived filters, applied after mapping because both are computed values.
+  if (query.review) items = items.filter((item) => item.reviewState === query.review);
+  if (query.priority) items = items.filter((item) => item.priority === query.priority);
+
+  items = sortInMemory(items, query.sort);
+
+  return {
+    items,
+    // Reflects the derived filters, so the "showing N of M" line stays truthful.
+    total: query.review || query.priority ? items.length : total,
+    take: query.take,
+    skip: query.skip,
+  };
+}
+
+/**
+ * Counts for the inbox summary row.
+ *
+ * Computed over the same filtered result the list shows, so the cards and the list
+ * below them can never disagree.
+ */
+export function summarizeInbox(items: OpportunitySummaryDto[], now: Date): OpportunityInboxStats {
+  const weekAhead = now.getTime() + 7 * 86_400_000;
+  const scores = items
+    .map((item) => item.bestMatchScore)
+    .filter((score): score is number => score !== null);
+
+  return {
+    total: items.length,
+    unreviewed: items.filter((item) => item.reviewState === "unreviewed").length,
+    highPriority: items.filter((item) => item.priority === "high").length,
+    dueThisWeek: items.filter((item) => {
+      if (!item.responseDeadline) return false;
+      const deadline = new Date(item.responseDeadline).getTime();
+      return deadline >= now.getTime() && deadline <= weekAhead;
+    }).length,
+    averageFitScore:
+      scores.length === 0
+        ? null
+        : Math.round(scores.reduce((total, score) => total + score, 0) / scores.length),
+  };
 }
 
 export async function getOpportunityById(id: string): Promise<OpportunityDetailDto> {

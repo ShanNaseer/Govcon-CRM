@@ -4,6 +4,10 @@ import type {
   OpportunitySourceType,
   OpportunityStatus,
 } from "@/generated/prisma/enums";
+import type {
+  OpportunityPriority,
+  OpportunityReviewState,
+} from "@/features/opportunities/opportunity.schemas";
 
 /**
  * Transport types for the Opportunity domain. Dates are ISO strings and money is
@@ -61,13 +65,40 @@ export type OpportunitySummaryDto = {
   postedDate: string | null;
   responseDeadline: string | null;
   status: OpportunityStatus;
+  contractType: string | null;
+  estimatedValueMin: string | null;
+  estimatedValueMax: string | null;
   primaryNaicsCode: string | null;
-  /** Highest overall score across all clients — the list's "match score" column. */
+  /** Highest overall score across all clients — the list's "fit score". */
   bestMatchScore: number | null;
   matchCount: number;
+  /** Urgency band derived from fit score and days remaining. */
+  priority: OpportunityPriority;
+  /** Whether the record has been triaged. NEW means it has not. */
+  reviewState: OpportunityReviewState;
+  /** Posted within the last week — drives the NEW flag on the card. */
+  isNew: boolean;
 };
 
-export type OpportunityDetailDto = Omit<OpportunitySummaryDto, "primaryNaicsCode"> & {
+/** Counts backing the opportunities inbox summary row. */
+export type OpportunityInboxStats = {
+  total: number;
+  unreviewed: number;
+  highPriority: number;
+  dueThisWeek: number;
+  /** Mean fit score across scored records, rounded. Null when nothing is scored. */
+  averageFitScore: number | null;
+};
+
+/**
+ * The detail view carries the full relations, so it omits the summary's derived
+ * conveniences: `primaryNaicsCode` (it has the whole `naicsCodes` list) and the
+ * inbox-card fields, which belong to the triage list rather than the record.
+ */
+export type OpportunityDetailDto = Omit<
+  OpportunitySummaryDto,
+  "primaryNaicsCode" | "priority" | "reviewState" | "isNew"
+> & {
   description: string | null;
   sourceUrl: string | null;
   subAgency: string | null;

@@ -140,7 +140,7 @@ export default async function DashboardPage() {
   const result = await safeQuery("dashboard", async () => {
     const [stats, recent] = await Promise.all([
       getDashboardStats(now),
-      listOpportunities({ take: 5, skip: 0 }, now),
+      listOpportunities({ take: 5, skip: 0, sort: "due-date" }, now),
     ]);
     return { stats, recent };
   });

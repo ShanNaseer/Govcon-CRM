@@ -59,6 +59,19 @@
   /* Neutral fill behind the stage tiles and stat chips in the dashboard panels. */
   --color-tile: #f7f9fc;
   --color-tile-track: #e7ebf0;
+
+  /*
+   * Opportunities inbox palette. The design's triage screen uses its own softer,
+   * higher-chroma set rather than the status colours above — those are tuned for
+   * small text on white, these for fills, stripes and progress bars.
+   */
+  --color-field: #f5f6fb;
+  --color-brand-tint: #e9f3ff;
+  --color-fit-strong: #29c27f;
+  --color-fit-fair: #4a90e2;
+  --color-fit-weak: #ffa24b;
+  --color-fit-poor: #e05a47;
+  --radius-inbox-card: 1rem;
 }
 
 html {

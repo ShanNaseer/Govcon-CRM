@@ -1,26 +1,39 @@
 import Link from "next/link";
-import { Radar } from "lucide-react";
+import { AlertCircle, Clock, Inbox, Search, Sparkles, TrendingUp } from "lucide-react";
 
-import { PageHeader } from "@/components/layout/page-header";
-import { OpportunityFilters } from "@/components/opportunities/opportunity-filters";
-import { OpportunityRow } from "@/components/opportunities/opportunity-row";
+import { InboxStatCard } from "@/components/opportunities/inbox-stat-card";
+import { OpportunityCard } from "@/components/opportunities/opportunity-card";
+import {
+  OpportunityInboxFilters,
+  type FilterOption,
+} from "@/components/opportunities/opportunity-inbox-filters";
 import { Card } from "@/components/ui/card";
-import { EmptyState, ErrorState } from "@/components/ui/states";
-import { Table, TableWrapper, TBody, TH, THead, TR } from "@/components/ui/table";
+import { ErrorState } from "@/components/ui/states";
 import { listOpportunitiesQuerySchema } from "@/features/opportunities/opportunity.schemas";
-import { listOpportunities } from "@/features/opportunities/opportunity.service";
+import { listOpportunities, summarizeInbox } from "@/features/opportunities/opportunity.service";
+import { OpportunitySourceType } from "@/generated/prisma/enums";
 import { DATABASE_UNAVAILABLE_MESSAGE, safeQuery } from "@/lib/db/safe-query";
+import { humanizeEnum } from "@/lib/utils";
 
-export const metadata = { title: "Opportunities" };
+export const metadata = { title: "GovCon Opportunities Inbox" };
 
 export const dynamic = "force-dynamic";
+
+/** Provider filter options, labelled as the design shows them. */
+const SOURCE_OPTIONS: FilterOption[] = [
+  { value: "", label: "All Sources" },
+  ...Object.values(OpportunitySourceType).map((source) => ({
+    value: source,
+    label: source === OpportunitySourceType.SAM_GOV ? "SAM.gov" : humanizeEnum(source),
+  })),
+];
 
 export default async function OpportunitiesPage({ searchParams }: PageProps<"/opportunities">) {
   const params = await searchParams;
   const now = new Date();
 
-  // URL parameters are untrusted; invalid values fall back to defaults rather
-  // than failing the page. Empty strings from the filter form parse to undefined.
+  // URL parameters are untrusted; invalid values fall back to defaults rather than
+  // failing the page. Empty strings from the filter bar parse to undefined.
   const parsed = listOpportunitiesQuerySchema.safeParse(
     Object.fromEntries(
       Object.entries(params).filter(([, value]) => value !== "" && value !== undefined),
@@ -31,10 +44,12 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
   const result = await safeQuery("opportunities-list", () => listOpportunities(query, now));
 
   const header = (
-    <PageHeader
-      title="Opportunities"
-      description="Normalized government solicitations from every connected source."
-    />
+    <div className="mb-6">
+      <h1 className="text-[22px] leading-tight font-semibold text-ink">GovCon Opportunities Inbox</h1>
+      <p className="mt-0.5 text-[13px] leading-tight text-ink-faint">
+        Review newly discovered government opportunities before qualification.
+      </p>
+    </div>
   );
 
   if (!result.ok) {
@@ -49,65 +64,107 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
   }
 
   const { items, total } = result.data;
-  const isFiltered = Object.keys(params).some((key) => key !== "take" && key !== "skip");
+  const stats = summarizeInbox(items, now);
+
+  const filterState = {
+    search: query.search ?? "",
+    source: query.source ?? "",
+    priority: query.priority ?? "",
+    review: query.review ?? "",
+    sort: query.sort,
+  };
+
+  const isFiltered =
+    Boolean(filterState.search) ||
+    Boolean(filterState.source) ||
+    Boolean(filterState.priority) ||
+    Boolean(filterState.review);
 
   return (
     <>
       {header}
 
-      <Card>
-        <div className="border-b border-line px-4 py-3">
-          <OpportunityFilters query={query} />
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <InboxStatCard
+          tone="brand"
+          label="Total Inbox"
+          value={stats.total}
+          hint={isFiltered ? `${stats.total} matching filters` : undefined}
+          icon={<Inbox className="h-5 w-5" aria-hidden />}
+        />
+        <InboxStatCard
+          tone="accent"
+          label="Unreviewed"
+          value={stats.unreviewed}
+          icon={<Sparkles className="h-5 w-5" aria-hidden />}
+        />
+        <InboxStatCard
+          tone="critical"
+          label="High Priority"
+          value={stats.highPriority}
+          icon={<AlertCircle className="h-5 w-5" aria-hidden />}
+        />
+        <InboxStatCard
+          tone="warning"
+          label="Due This Week"
+          value={stats.dueThisWeek}
+          icon={<Clock className="h-5 w-5" aria-hidden />}
+        />
+        <InboxStatCard
+          tone="positive"
+          label="Avg Fit Score"
+          // A dash rather than 0%: nothing scored is not the same as a poor fit.
+          value={stats.averageFitScore === null ? "—" : `${stats.averageFitScore}%`}
+          hint={
+            stats.averageFitScore === null
+              ? "Not yet scored"
+              : stats.averageFitScore >= 70
+                ? "Good pipeline quality"
+                : "Improve match criteria"
+          }
+          icon={<TrendingUp className="h-5 w-5" aria-hidden />}
+        />
+      </div>
+
+      <div className="mb-5">
+        <OpportunityInboxFilters state={filterState} sourceOptions={SOURCE_OPTIONS} />
+      </div>
+
+      {items.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-tile">
+            <Search className="h-6 w-6 text-ink-muted" aria-hidden />
+          </div>
+          <h3 className="mb-1 text-sm font-semibold text-ink">
+            {isFiltered ? "No results found" : "Inbox is clear"}
+          </h3>
+          <p className="max-w-sm text-sm text-ink-muted">
+            {isFiltered
+              ? "Try adjusting your search or filters."
+              : "New opportunities will appear here once a provider connector imports them. No source integration is enabled in this release."}
+          </p>
+          {isFiltered ? (
+            <Link href="/opportunities" className="mt-4 text-sm font-medium text-brand hover:underline">
+              Clear all filters
+            </Link>
+          ) : null}
         </div>
+      ) : (
+        <>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm text-ink-muted">
+              Showing <span className="font-medium text-ink">{items.length}</span> of {total}{" "}
+              opportunit{total === 1 ? "y" : "ies"}
+            </p>
+          </div>
 
-        {items.length === 0 ? (
-          <EmptyState
-            icon={<Radar className="h-5 w-5" aria-hidden />}
-            title={isFiltered ? "No opportunities match these filters" : "No opportunities yet"}
-            description={
-              isFiltered
-                ? "Try widening the deadline window or clearing the score filter."
-                : "Opportunities appear here once a provider connector imports and normalizes them. No source integration is enabled in this release."
-            }
-            action={
-              isFiltered ? (
-                <Link href="/opportunities" className="text-xs font-medium text-brand hover:underline">
-                  Clear filters
-                </Link>
-              ) : null
-            }
-          />
-        ) : (
-          <>
-            <TableWrapper>
-              <Table>
-                <THead>
-                  <TR>
-                    <TH>Score</TH>
-                    <TH>Title</TH>
-                    <TH>Agency</TH>
-                    <TH>Source</TH>
-                    <TH>NAICS</TH>
-                    <TH>Set-Aside</TH>
-                    <TH>Posted</TH>
-                    <TH>Deadline</TH>
-                    <TH>Status</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {items.map((opportunity) => (
-                    <OpportunityRow key={opportunity.id} opportunity={opportunity} now={now} />
-                  ))}
-                </TBody>
-              </Table>
-            </TableWrapper>
-
-            <div className="border-t border-line px-4 py-2 text-xs text-ink-muted">
-              Showing {items.length} of {total} opportunit{total === 1 ? "y" : "ies"}
-            </div>
-          </>
-        )}
-      </Card>
+          <div className="space-y-3">
+            {items.map((opportunity) => (
+              <OpportunityCard key={opportunity.id} opportunity={opportunity} now={now} />
+            ))}
+          </div>
+        </>
+      )}
     </>
   );
 }
