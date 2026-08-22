@@ -31,6 +31,26 @@ function createPrismaClient(): PrismaClient {
 
   const adapter = new PrismaPg({
     connectionString: resolveDatabaseUrl(env.DATABASE_URL, env.DATABASE_CA_CERT_PATH),
+
+    /*
+     * Fail fast when the database is unreachable. node-postgres otherwise waits on
+     * the OS TCP timeout — around 16 seconds — which a serverless request spends
+     * hanging before it can report anything. Eight seconds is well beyond a healthy
+     * connect (single-digit milliseconds inside the same region) and short enough
+     * that a blocked route surfaces the failure instead of stalling.
+     */
+    connectionTimeoutMillis: 8_000,
+
+    /*
+     * Serverless sizing. Every instance keeps its own pool and instances scale
+     * independently, so the ceiling that matters is `max` × concurrent instances
+     * against PostgreSQL's `max_connections` (roughly 85 on db.t4g.micro). A small
+     * per-instance cap plus a short idle timeout keeps a traffic spike from
+     * exhausting the server. A connection pooler in front of the database is the
+     * real fix at scale; these bounds are what make the direct connection survivable.
+     */
+    max: 5,
+    idleTimeoutMillis: 10_000,
   });
 
   return new PrismaClient({
