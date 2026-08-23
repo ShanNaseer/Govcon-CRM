@@ -12,7 +12,7 @@ import { ErrorState } from "@/components/ui/states";
 import { listOpportunitiesQuerySchema } from "@/features/opportunities/opportunity.schemas";
 import { listOpportunities, summarizeInbox } from "@/features/opportunities/opportunity.service";
 import { OpportunitySourceType } from "@/generated/prisma/enums";
-import { DATABASE_UNAVAILABLE_MESSAGE, safeQuery } from "@/lib/db/safe-query";
+import { safeQuery } from "@/lib/db/safe-query";
 import { humanizeEnum } from "@/lib/utils";
 
 export const metadata = { title: "GovCon Opportunities Inbox" };
@@ -57,7 +57,7 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
       <>
         {header}
         <Card>
-          <ErrorState title="Opportunities unavailable" description={DATABASE_UNAVAILABLE_MESSAGE} />
+          <ErrorState title="Opportunities unavailable" description={result.message} />
         </Card>
       </>
     );

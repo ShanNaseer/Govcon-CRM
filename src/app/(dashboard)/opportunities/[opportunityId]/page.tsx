@@ -12,7 +12,7 @@ import { Card, CardBody, CardHeader, DefinitionList, DefinitionRow } from "@/com
 import { ChipList } from "@/components/ui/chip-list";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { findOpportunityById } from "@/features/opportunities/opportunity.service";
-import { DATABASE_UNAVAILABLE_MESSAGE, safeQuery } from "@/lib/db/safe-query";
+import { safeQuery } from "@/lib/db/safe-query";
 import { daysUntil, formatCurrencyRange, formatDate, humanizeEnum } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +44,7 @@ export default async function OpportunityDetailPage({
       <>
         <PageHeader title="Opportunity" breadcrumbs={[{ label: "Opportunities", href: "/opportunities" }]} />
         <Card>
-          <ErrorState title="Opportunity unavailable" description={DATABASE_UNAVAILABLE_MESSAGE} />
+          <ErrorState title="Opportunity unavailable" description={result.message} />
         </Card>
       </>
     );

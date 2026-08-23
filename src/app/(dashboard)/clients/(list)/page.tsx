@@ -10,7 +10,7 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { Table, TableWrapper, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { listClients } from "@/features/clients/client.service";
 import { listClientsQuerySchema } from "@/features/clients/client.schemas";
-import { DATABASE_UNAVAILABLE_MESSAGE, safeQuery } from "@/lib/db/safe-query";
+import { safeQuery } from "@/lib/db/safe-query";
 
 export const metadata = { title: "Clients" };
 
@@ -45,7 +45,7 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
       <>
         {header}
         <Card>
-          <ErrorState title="Clients unavailable" description={DATABASE_UNAVAILABLE_MESSAGE} />
+          <ErrorState title="Clients unavailable" description={result.message} />
         </Card>
       </>
     );

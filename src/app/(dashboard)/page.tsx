@@ -31,7 +31,7 @@ import type {
   DashboardDeadlineDto,
   DashboardOpportunityDto,
 } from "@/features/opportunities/opportunity.types";
-import { DATABASE_UNAVAILABLE_MESSAGE, safeQuery } from "@/lib/db/safe-query";
+import { safeQuery } from "@/lib/db/safe-query";
 import { cn, formatDate, formatMillions } from "@/lib/utils";
 
 export const metadata = { title: "Lifecycle Dashboard" };
@@ -163,7 +163,7 @@ export default async function DashboardPage() {
       <>
         {header}
         <Card>
-          <ErrorState title="Dashboard unavailable" description={DATABASE_UNAVAILABLE_MESSAGE} />
+          <ErrorState title="Dashboard unavailable" description={result.message} />
         </Card>
       </>
     );

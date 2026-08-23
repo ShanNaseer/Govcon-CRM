@@ -8,7 +8,7 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { Tabs, resolveActiveTab, type TabDefinition } from "@/components/ui/tabs";
 import { findClientById } from "@/features/clients/client.service";
 import { KeywordType } from "@/generated/prisma/enums";
-import { DATABASE_UNAVAILABLE_MESSAGE, safeQuery } from "@/lib/db/safe-query";
+import { safeQuery } from "@/lib/db/safe-query";
 import { formatCurrencyRange, formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +44,7 @@ export default async function ClientDetailPage({
       <>
         <PageHeader title="Client" breadcrumbs={[{ label: "Clients", href: "/clients" }]} />
         <Card>
-          <ErrorState title="Client unavailable" description={DATABASE_UNAVAILABLE_MESSAGE} />
+          <ErrorState title="Client unavailable" description={result.message} />
         </Card>
       </>
     );

@@ -52,7 +52,7 @@ export const NAV_SECTIONS: NavSection[] = [
     title: "Dashboard",
     items: [
       { label: "Dashboard", href: "/", icon: LayoutDashboard, implemented: true },
-      { label: "Tasks", href: "/tasks", icon: CheckSquare, implemented: false },
+      { label: "Tasks", href: "/tasks", icon: CheckSquare, implemented: true },
       { label: "Team", href: "/team", icon: Users, implemented: false },
       { label: "Reports", href: "/reports", icon: BarChart3, implemented: false },
     ],
