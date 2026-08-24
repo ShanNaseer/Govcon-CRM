@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/db/prisma";
 import { UserRole } from "@/generated/prisma/enums";
+import { roleHasPermission, type Permission } from "@/lib/auth/permissions";
 
 /**
  * Authentication boundary.
@@ -187,6 +188,45 @@ export async function requireUser(): Promise<Session> {
   if (!session) redirect("/login");
 
   return session;
+}
+
+/**
+ * Asserts the caller holds a permission, throwing `AppError` with code FORBIDDEN —
+ * which the API error handler maps to a 403.
+ *
+ * This is the check that enforces roles. Filtering the sidebar hides doors; this
+ * locks them. Services call it before the repository, so a member cannot reach an
+ * admin capability by typing a URL or replaying a Server Function call.
+ */
+export async function requirePermission(permission: Permission): Promise<Session> {
+  const session = await requireSession();
+
+  if (!roleHasPermission(session.role, permission)) {
+    const { AppError } = await import("@/lib/api/errors");
+    throw AppError.forbidden(`Your role does not allow ${permission}`);
+  }
+
+  return session;
+}
+
+/**
+ * Page-level equivalent: redirects rather than throwing, so a member who follows a
+ * stale link lands somewhere usable instead of on an error boundary.
+ *
+ * Unauthenticated callers go to /login via `requireUser`; authenticated ones
+ * without the permission go to the dashboard, which every role can read.
+ */
+export async function requirePagePermission(permission: Permission): Promise<Session> {
+  const session = await requireUser();
+
+  if (!roleHasPermission(session.role, permission)) redirect("/");
+
+  return session;
+}
+
+/** Convenience for UI branching inside an already-loaded page. */
+export function sessionHasPermission(session: Session, permission: Permission): boolean {
+  return roleHasPermission(session.role, permission);
 }
 
 /** Revokes the current session and clears its cookie. Server Functions only. */

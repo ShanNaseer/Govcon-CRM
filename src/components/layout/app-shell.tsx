@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 
 import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import type { Permission } from "@/lib/auth/permissions";
 
 /**
  * Dashboard chrome: sidebar rail, header, scrollable content column.
@@ -18,12 +19,14 @@ export function AppShell({
   userEmail,
   userName,
   userRole,
+  permissions,
   children,
 }: {
   appName: string;
   userEmail: string;
   userName?: string;
   userRole?: string;
+  permissions: readonly Permission[];
   children: ReactNode;
 }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -35,6 +38,7 @@ export function AppShell({
         userEmail={userEmail}
         userName={userName}
         userRole={userRole}
+        permissions={permissions}
         mobileOpen={mobileMenuOpen}
         onNavigate={() => setMobileMenuOpen(false)}
       />

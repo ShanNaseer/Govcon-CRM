@@ -413,7 +413,16 @@ model User {
   /// Never a raw or reversibly-encoded password.
   passwordHash String
 
+  /// Permission role — a closed set, and the only thing authorization reads.
+  /// Deliberately separate from `jobTitle`: the reference design uses one free-text
+  /// "role" field for both the job someone does and what they may access, which
+  /// makes permissions unenforceable.
   role UserRole @default(MEMBER)
+
+  /// Human-facing job title, e.g. "Proposal Manager". Display only.
+  jobTitle   String?
+  department String?
+  phone      String?
 
   /// Disabling a user blocks sign-in and invalidates existing sessions without
   /// destroying the audit trail a deletion would take with it.

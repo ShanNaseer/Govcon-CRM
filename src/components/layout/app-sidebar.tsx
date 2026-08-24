@@ -6,6 +6,7 @@ import { Target } from "lucide-react";
 
 import { NAV_SECTIONS, type NavItem } from "@/components/layout/nav-config";
 import { UserMenu } from "@/components/layout/user-menu";
+import type { Permission } from "@/lib/auth/permissions";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,6 +30,7 @@ export function AppSidebar({
   userEmail,
   userName,
   userRole,
+  permissions,
   mobileOpen,
   onNavigate,
 }: {
@@ -36,10 +38,25 @@ export function AppSidebar({
   userEmail: string;
   userName?: string;
   userRole?: string;
+  /** The viewer's permissions, resolved on the server from their role. */
+  permissions: readonly Permission[];
   mobileOpen: boolean;
   onNavigate: () => void;
 }) {
   const pathname = usePathname();
+
+  /*
+   * Entries the viewer cannot use are removed entirely, and a section left with
+   * nothing in it is dropped with them — an empty "Bids & Compliance" heading is
+   * worse than no heading. This is presentation only; the routes enforce the same
+   * permissions server-side.
+   */
+  const visibleSections = NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.filter(
+      (item) => !item.permission || permissions.includes(item.permission),
+    ),
+  })).filter((section) => section.items.length > 0);
 
   return (
     <aside
@@ -61,7 +78,7 @@ export function AppSidebar({
         </div>
 
         <nav aria-label="Main navigation" className="flex-1 space-y-6 overflow-y-auto p-4">
-          {NAV_SECTIONS.map((section, sectionIndex) => (
+          {visibleSections.map((section, sectionIndex) => (
             <div key={section.title ?? `section-${sectionIndex}`}>
               {section.title ? (
                 <p className="mb-2 px-3 text-[12px] font-semibold text-ink-subtle">{section.title}</p>

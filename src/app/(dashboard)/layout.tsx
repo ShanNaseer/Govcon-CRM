@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
 import { AppShell } from "@/components/layout/app-shell";
+import { permissionsForRole, ROLE_LABELS } from "@/lib/auth/permissions";
 import { requireUser } from "@/lib/auth/session";
-import { humanizeEnum } from "@/lib/utils";
 
 /**
  * Dashboard shell: sidebar rail, header, scrollable content column.
@@ -22,7 +22,8 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       appName={process.env.NEXT_PUBLIC_APP_NAME ?? "GovCon CRM"}
       userEmail={session.email}
       userName={session.name}
-      userRole={humanizeEnum(session.role)}
+      userRole={ROLE_LABELS[session.role]}
+      permissions={permissionsForRole(session.role)}
     >
       {children}
     </AppShell>

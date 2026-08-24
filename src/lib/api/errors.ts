@@ -76,6 +76,15 @@ export class AppError extends Error {
   static unauthorized(message = "Authentication is required"): AppError {
     return new AppError("UNAUTHORIZED", message);
   }
+
+  /**
+   * Authenticated, but not allowed. Distinct from `unauthorized` on purpose: a 401
+   * tells the client to sign in, while a 403 tells it that signing in again will
+   * not help.
+   */
+  static forbidden(message = "You do not have permission to do that"): AppError {
+    return new AppError("FORBIDDEN", message);
+  }
 }
 
 /** Converts a Zod failure into the `details` payload of a validation error. */
