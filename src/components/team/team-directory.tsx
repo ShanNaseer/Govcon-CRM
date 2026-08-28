@@ -110,7 +110,7 @@ function MemberCard({
         <span
           className={cn(
             "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
-            member.isActive ? "bg-[#29c27f]/12 text-[#1a8f5c]" : "bg-field text-ink-muted",
+            member.isActive ? "bg-fit-strong/12 text-[#1a8f5c]" : "bg-field text-ink-muted",
           )}
         >
           <span
