@@ -290,6 +290,20 @@ model Opportunity {
   placeState   String?
   placeCountry String?
 
+  /// Who has taken this opportunity into their queue, and when.
+  ///
+  /// Null means nobody has claimed it, which is what puts a record in the shared
+  /// inbox — the inbox is defined as the unclaimed pool, not as a status. An owner
+  /// is tracked separately from `status` because the two answer different questions:
+  /// INTERESTED says the team wants to pursue it, `assignedToId` says whose desk it
+  /// is on. Without this column "My Queue" could only ever mean "everyone's queue".
+  ///
+  /// SetNull, not Cascade: removing a user must not delete the opportunities they
+  /// were working, it must return them to the inbox for someone else to pick up.
+  assignedToId String?
+  assignedTo   User?     @relation("OpportunityOwner", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedAt   DateTime?
+
   /// Internal workflow status.
   status       OpportunityStatus @default(NEW)
   /// Publication status as reported by the source system (e.g. "active", "archived").
@@ -310,6 +324,9 @@ model Opportunity {
   // Prevents duplicate imports of the same record from the same provider.
   @@unique([source, externalId])
   @@index([status])
+  // Every "My Queue" read filters on this, and every inbox read filters on it
+  // being null.
+  @@index([assignedToId])
   @@index([responseDeadline])
   @@index([postedDate])
   @@index([agency])
@@ -440,6 +457,9 @@ model User {
   assignedTasks Task[]    @relation("TaskAssignee")
   createdTasks  Task[]    @relation("TaskCreator")
 
+  /// Opportunities this person has taken into their queue.
+  ownedOpportunities Opportunity[] @relation("OpportunityOwner")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -470,6 +490,39 @@ model Session {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+/// A permission granted to a role, editable at runtime from /team/permissions.
+///
+/// One row per grant rather than a `String[]` column on a role table, for two
+/// reasons: toggling one checkbox is an insert or a delete rather than a
+/// read-modify-write of an array (so two administrators editing different cells
+/// cannot overwrite each other), and each grant carries its own audit trail.
+///
+/// ABSENCE IS DENIAL. A permission removed from `PERMISSIONS` in
+/// src/lib/auth/permissions.ts therefore stops being granted without needing a data
+/// migration, and a role with no rows can do nothing. The one exception is an
+/// entirely empty table, which src/lib/auth/role-permissions.ts reads as "not yet
+/// configured" and answers from the code defaults — otherwise deploying this
+/// migration would lock every user out until someone seeded it.
+model RolePermission {
+  role UserRole
+
+  /// Matches a value of `Permission` in src/lib/auth/permissions.ts. Deliberately
+  /// a String and not an enum: the permission set changes with the feature set, and
+  /// an enum would make every new capability a migration. Unrecognised values are
+  /// discarded on read, so a stale row cannot grant anything.
+  permission String
+
+  grantedAt DateTime @default(now())
+
+  /// User who granted it. SetNull-equivalent by being a plain id rather than a
+  /// relation: deleting an administrator must not delete the grants they made, and
+  /// this column is for the audit trail only, never for authorization.
+  grantedById String?
+
+  @@id([role, permission])
+  @@index([role])
 }
 
 // ---------------------------------------------------------------------------
