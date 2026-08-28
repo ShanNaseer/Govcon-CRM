@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { UserPlus } from "lucide-react";
 
 import { addTeamMemberAction, type TeamActionState } from "@/app/(dashboard)/team/actions";
@@ -148,8 +149,11 @@ export function AddMemberDialog({ open, onClose }: { open: boolean; onClose: () 
             ))}
           </Select>
           {/*
-           * Spelling out what each role grants at the point of choosing it — an
-           * access decision made from a bare label is a guess.
+           * Says what each role is for at the point of choosing it — an access
+           * decision made from a bare label is a guess. What each role can actually
+           * reach is editable, so the exact grants are linked rather than listed
+           * here; a hard-coded list would start lying the first time someone
+           * changed a cell in the matrix.
            */}
           <ul className="mt-2 space-y-1">
             {Object.values(UserRole).map((role) => (
@@ -159,6 +163,12 @@ export function AddMemberDialog({ open, onClose }: { open: boolean; onClose: () 
               </li>
             ))}
           </ul>
+          <p className="mt-2 text-xs text-ink-subtle">
+            <Link href="/team/permissions" className="text-brand hover:underline">
+              Roles &amp; Permissions
+            </Link>{" "}
+            sets which tabs and actions each role can reach.
+          </p>
           <FieldError messages={errors.role} />
         </div>
 

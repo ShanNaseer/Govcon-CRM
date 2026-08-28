@@ -8,10 +8,13 @@ import {
   Sparkles,
   Tag,
   TrendingUp,
+  UserCheck,
 } from "lucide-react";
 
-import { TriageActions } from "@/components/opportunities/triage-actions";
+import { AssignOwnerSelect } from "@/components/opportunities/assign-owner-select";
+import { QueueActions, TriageActions } from "@/components/opportunities/triage-actions";
 import type { OpportunitySummaryDto } from "@/features/opportunities/opportunity.types";
+import type { AssignableOwnerDto } from "@/features/team/team.types";
 import type { OpportunityPriority } from "@/features/opportunities/opportunity.schemas";
 import { cn, daysUntil, formatCurrencyRange, formatDate, humanizeEnum } from "@/lib/utils";
 
@@ -101,9 +104,27 @@ function DataCell({
 export function OpportunityCard({
   opportunity,
   now,
+  canWrite,
+  context = "inbox",
+  assignableOwners,
 }: {
   opportunity: OpportunitySummaryDto;
   now: Date;
+  /**
+   * `opportunities:write`, resolved on the server from the role matrix. Presentation
+   * only — the triage Server Functions check it again before they write.
+   */
+  canWrite: boolean;
+  /**
+   * Which list the card is in. "inbox" offers Assign / Reviewed / Pass; "queue"
+   * offers Return to Inbox / Pass and shows who holds it.
+   */
+  context?: "inbox" | "queue";
+  /**
+   * People this can be handed to. Supplied only when the viewer holds
+   * `opportunities:assign`; absent or empty means no picker is rendered.
+   */
+  assignableOwners?: AssignableOwnerDto[];
 }) {
   const priority = PRIORITY_CONFIG[opportunity.priority];
   const PriorityIcon = priority.icon;
@@ -167,6 +188,22 @@ export function OpportunityCard({
                 <span className="inline-flex shrink-0 items-center gap-1">
                   <Calendar className="h-3 w-3 shrink-0" aria-hidden />
                   Posted {formatDate(opportunity.postedDate)}
+                </span>
+              ) : null}
+
+              {/*
+               * Who holds it, and since when. Shown wherever an owner exists rather
+               * than only in My Queue: a claimed record can still be reached from
+               * the dashboard and from search, and "whose desk is this on" is the
+               * first thing to know about one.
+               */}
+              {opportunity.assignedToName ? (
+                <span className="inline-flex min-w-0 items-center gap-1 text-brand">
+                  <UserCheck className="h-3 w-3 shrink-0" aria-hidden />
+                  <span className="max-w-40 truncate">
+                    {context === "queue" ? "In your queue" : opportunity.assignedToName}
+                    {opportunity.assignedAt ? ` · ${formatDate(opportunity.assignedAt)}` : ""}
+                  </span>
                 </span>
               ) : null}
             </div>
@@ -254,7 +291,30 @@ export function OpportunityCard({
         <div aria-hidden className="mb-4 h-px bg-line" />
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <TriageActions opportunityId={opportunity.id} />
+          {/*
+           * Without `opportunities:write` the card keeps View Details and drops the
+           * action row, so a read-only role sees the pipeline without controls that
+           * would only fail for them.
+           */}
+          {canWrite ? (
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2">
+              {context === "queue" ? (
+                <QueueActions opportunityId={opportunity.id} />
+              ) : (
+                <TriageActions opportunityId={opportunity.id} />
+              )}
+
+              {assignableOwners && assignableOwners.length > 0 ? (
+                <AssignOwnerSelect
+                  opportunityId={opportunity.id}
+                  currentOwnerId={opportunity.assignedToId}
+                  owners={assignableOwners}
+                />
+              ) : null}
+            </div>
+          ) : (
+            <span />
+          )}
 
           <Link
             href={`/opportunities/${opportunity.id}`}

@@ -1,4 +1,5 @@
 import type { UserRole } from "@/generated/prisma/enums";
+import type { Permission } from "@/lib/auth/permissions";
 
 /**
  * Transport types for team management.
@@ -29,4 +30,44 @@ export type TeamStats = {
   active: number;
   tasksAssigned: number;
   tasksCompleted: number;
+};
+
+/**
+ * A person an opportunity can be handed to.
+ *
+ * Intentionally minimal — an id, a name and enough context to tell two people with
+ * similar names apart. It populates a picker rendered to whoever holds
+ * `opportunities:assign`, so it carries no email, phone or activity figures.
+ */
+export type AssignableOwnerDto = {
+  id: string;
+  name: string;
+  role: UserRole;
+  jobTitle: string | null;
+};
+
+/** One role's column in the permission matrix. */
+export type RolePermissionColumnDto = {
+  role: UserRole;
+  granted: Permission[];
+  /**
+   * Grants this role cannot lose, sent so the matrix can render them as fixed
+   * rather than reimplementing the rules client-side and risking a disagreement
+   * with what the server will actually accept.
+   */
+  locked: Permission[];
+  /** Active users this column applies to, so a revocation states its reach. */
+  activeUsers: number;
+};
+
+export type RolePermissionMatrixDto = {
+  columns: RolePermissionColumnDto[];
+  /**
+   * False while the workspace is still running on the code defaults, i.e. nothing
+   * has been edited and no rows exist yet. The page says so, because "these are the
+   * defaults" and "someone chose exactly the defaults" are different situations.
+   */
+  configured: boolean;
+  /** ISO 8601 of the most recent grant, or null when nothing has been edited. */
+  lastChangedAt: string | null;
 };

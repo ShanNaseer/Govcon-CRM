@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { UserRole } from "@/generated/prisma/enums";
+import { PERMISSIONS } from "@/lib/auth/permissions";
 
 /**
  * Zod schemas for team management. Shared with the client bundle, so nothing
@@ -69,6 +70,19 @@ export const resetPasswordSchema = z
     error: "Passwords do not match",
     path: ["confirmPassword"],
   });
+
+/**
+ * One cell of the permission matrix.
+ *
+ * `permission` is validated against the catalogue rather than accepted as free text,
+ * so a replayed or hand-crafted Server Function call cannot insert a grant naming
+ * something the application will never recognise.
+ */
+export const setRolePermissionSchema = z.object({
+  role: z.enum(UserRole),
+  permission: z.enum(PERMISSIONS),
+  enabled: z.boolean(),
+});
 
 export const listTeamQuerySchema = z.object({
   search: optionalText(200),

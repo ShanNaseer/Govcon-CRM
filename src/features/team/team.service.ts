@@ -3,10 +3,11 @@ import "server-only";
 import * as repository from "@/features/team/team.repository";
 import type { MemberRow } from "@/features/team/team.repository";
 import type { CreateTeamMemberInput, ListTeamQuery } from "@/features/team/team.schemas";
-import type { TeamMemberDto, TeamStats } from "@/features/team/team.types";
+import type { AssignableOwnerDto, TeamMemberDto, TeamStats } from "@/features/team/team.types";
 import { UserRole } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/api/errors";
 import { hashPassword } from "@/lib/auth/password";
+import { getRolePermissionMap } from "@/lib/auth/role-permissions";
 import { requirePermission } from "@/lib/auth/session";
 import { logger } from "@/lib/logger";
 
@@ -55,6 +56,33 @@ export function summarizeTeam(members: TeamMemberDto[]): TeamStats {
     tasksAssigned: members.reduce((sum, member) => sum + member.tasksAssigned, 0),
     tasksCompleted: members.reduce((sum, member) => sum + member.tasksCompleted, 0),
   };
+}
+
+/**
+ * People an opportunity can be handed to.
+ *
+ * Guarded by `opportunities:assign` rather than `team:read`: the caller is
+ * distributing work, not browsing the directory, and those are separately grantable
+ * in the matrix. Anyone whose role cannot read opportunities is filtered out —
+ * assigning work into a queue its owner cannot open would be a silent dead end, and
+ * the picker should not offer it in the first place.
+ */
+export async function listAssignableOwners(): Promise<AssignableOwnerDto[]> {
+  await requirePermission("opportunities:assign");
+
+  const [members, rolePermissions] = await Promise.all([
+    repository.findActiveMembersForAssignment(),
+    getRolePermissionMap(),
+  ]);
+
+  return members
+    .filter((member) => rolePermissions[member.role].includes("opportunities:read"))
+    .map((member) => ({
+      id: member.id,
+      name: member.name,
+      role: member.role,
+      jobTitle: member.jobTitle,
+    }));
 }
 
 export async function createTeamMember(input: CreateTeamMemberInput): Promise<TeamMemberDto> {

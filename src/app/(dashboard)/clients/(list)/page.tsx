@@ -10,6 +10,7 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { Table, TableWrapper, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { listClients } from "@/features/clients/client.service";
 import { listClientsQuerySchema } from "@/features/clients/client.schemas";
+import { requirePagePermission, sessionHasPermission } from "@/lib/auth/session";
 import { safeQuery } from "@/lib/db/safe-query";
 
 export const metadata = { title: "Clients" };
@@ -17,6 +18,14 @@ export const metadata = { title: "Clients" };
 export const dynamic = "force-dynamic";
 
 export default async function ClientsPage({ searchParams }: PageProps<"/clients">) {
+  /*
+   * Redirects to the dashboard when the role no longer holds this grant, so a
+   * revoked permission reads as "not your page" rather than as an error card. The
+   * service checks it again at the data — this is the courtesy, not the boundary.
+   */
+  const session = await requirePagePermission("clients:read");
+  const canWrite = sessionHasPermission(session, "clients:write");
+
   const params = await searchParams;
 
   // Filters arrive from the URL, so they are untrusted input and get the same
@@ -32,10 +41,15 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
       title="Clients"
       description="Company profiles used to match government opportunities."
       actions={
-        <ButtonLink href="/clients/new" variant="primary">
-          <Plus aria-hidden />
-          Add Client
-        </ButtonLink>
+        // Hidden without `clients:write`, because /clients/new now redirects
+        // without it — a button whose only outcome is a redirect is worse than no
+        // button.
+        canWrite ? (
+          <ButtonLink href="/clients/new" variant="primary">
+            <Plus aria-hidden />
+            Add Client
+          </ButtonLink>
+        ) : null
       }
     />
   );

@@ -8,7 +8,7 @@ import * as repository from "@/features/clients/client.repository";
 import type { CreateClientInput, ListClientsQuery, UpdateClientInput } from "@/features/clients/client.schemas";
 import type { ClientDetailDto, ClientListResult, ClientSummaryDto } from "@/features/clients/client.types";
 import { AppError } from "@/lib/api/errors";
-import { requireSession } from "@/lib/auth/session";
+import { requirePermission } from "@/lib/auth/session";
 import { logger } from "@/lib/logger";
 import { deriveInitials } from "@/lib/utils";
 
@@ -20,10 +20,15 @@ import { deriveInitials } from "@/lib/utils";
  * a schema (cross-field rules), DTO mapping, and domain error semantics.
  *
  * It is also the authorization choke point. Every exported function calls
- * `requireSession()` first, because a Server Component's data is serialized into
- * the RSC payload even when its parent layout declines to render it — so a check
- * in the layout alone does NOT keep records out of the response. The check must
- * live next to the data access, which is here.
+ * `requirePermission()` first — `clients:read` to look, `clients:write` to change —
+ * because a Server Component's data is serialized into the RSC payload even when
+ * its parent layout declines to render it, so a check in the layout alone does NOT
+ * keep records out of the response. The check must live next to the data access,
+ * which is here.
+ *
+ * The permission, not merely a session: those grants are editable per role from
+ * /team/permissions, and a control that only hid the sidebar entry would be a
+ * setting that does not set anything.
  */
 
 /** Prisma `Decimal` -> exact decimal string, preserving cents. */
@@ -145,7 +150,7 @@ function assertConsistentInput(input: CreateClientInput | UpdateClientInput): vo
 }
 
 export async function listClients(query: ListClientsQuery): Promise<ClientListResult> {
-  await requireSession();
+  await requirePermission("clients:read");
 
   const { rows, total } = await repository.findManyClients(query);
 
@@ -158,7 +163,7 @@ export async function listClients(query: ListClientsQuery): Promise<ClientListRe
 }
 
 export async function getClientById(id: string): Promise<ClientDetailDto> {
-  await requireSession();
+  await requirePermission("clients:read");
 
   const row = await repository.findClientById(id);
   if (!row) throw AppError.notFound("Client", id);
@@ -167,14 +172,14 @@ export async function getClientById(id: string): Promise<ClientDetailDto> {
 
 /** Returns null instead of throwing — for pages that render their own not-found UI. */
 export async function findClientById(id: string): Promise<ClientDetailDto | null> {
-  await requireSession();
+  await requirePermission("clients:read");
 
   const row = await repository.findClientById(id);
   return row ? toDetailDto(row) : null;
 }
 
 export async function createClient(input: CreateClientInput): Promise<ClientDetailDto> {
-  await requireSession();
+  await requirePermission("clients:write");
   assertConsistentInput(input);
 
   const initials = input.initials ?? deriveInitials(input.name);
@@ -185,7 +190,7 @@ export async function createClient(input: CreateClientInput): Promise<ClientDeta
 }
 
 export async function updateClient(id: string, input: UpdateClientInput): Promise<ClientDetailDto> {
-  await requireSession();
+  await requirePermission("clients:write");
   assertConsistentInput(input);
 
   const existing = await repository.findClientById(id);
@@ -202,7 +207,7 @@ export async function updateClient(id: string, input: UpdateClientInput): Promis
 }
 
 export async function deleteClient(id: string): Promise<void> {
-  await requireSession();
+  await requirePermission("clients:write");
 
   const existing = await repository.findClientById(id);
   if (!existing) throw AppError.notFound("Client", id);
@@ -212,7 +217,7 @@ export async function deleteClient(id: string): Promise<void> {
 }
 
 export async function getClientStatusCounts(): Promise<Record<string, number>> {
-  await requireSession();
+  await requirePermission("clients:read");
 
   return repository.countClientsByStatus();
 }

@@ -66,6 +66,7 @@ function TaskCard({
   onEdit,
   onDragStart,
   busy,
+  canWrite,
   onMove,
   onDelete,
 }: {
@@ -74,6 +75,8 @@ function TaskCard({
   onEdit: (task: TaskDto) => void;
   onDragStart: (event: DragEvent<HTMLElement>, task: TaskDto) => void;
   busy: boolean;
+  /** `tasks:write`. Without it the card renders as a read-only summary. */
+  canWrite: boolean;
   onMove: (id: string, status: TaskStatus) => void;
   onDelete: (task: TaskDto) => void;
 }) {
@@ -91,10 +94,11 @@ function TaskCard({
 
   return (
     <article
-      draggable
-      onDragStart={(event) => onDragStart(event, task)}
+      draggable={canWrite}
+      onDragStart={canWrite ? (event) => onDragStart(event, task) : undefined}
       className={cn(
-        "cursor-grab rounded-card border bg-surface p-4 transition-shadow hover:shadow-md active:cursor-grabbing",
+        "rounded-card border bg-surface p-4 transition-shadow hover:shadow-md",
+        canWrite && "cursor-grab active:cursor-grabbing",
         isOverdue ? "border-[#fecaca] bg-critical-soft/50" : "border-line",
         busy && "opacity-50",
       )}
@@ -108,23 +112,32 @@ function TaskCard({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onEdit(task)}
-            aria-label={`Edit ${task.title}`}
-            className="rounded-md p-1 text-ink-subtle hover:bg-canvas hover:text-ink"
-          >
-            <Pencil className="h-3 w-3" aria-hidden />
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onDelete(task)}
-            aria-label={`Delete ${task.title}`}
-            className="rounded-md p-1 text-ink-subtle hover:bg-critical-soft hover:text-critical"
-          >
-            <Trash2 className="h-3 w-3" aria-hidden />
-          </button>
+          {/*
+           * Hidden rather than disabled without `tasks:write`: a greyed-out row of
+           * icons on every card is noise for someone who will never use them. The
+           * actions behind them re-check the permission server-side regardless.
+           */}
+          {canWrite ? (
+            <>
+              <button
+                type="button"
+                onClick={() => onEdit(task)}
+                aria-label={`Edit ${task.title}`}
+                className="rounded-md p-1 text-ink-subtle hover:bg-canvas hover:text-ink"
+              >
+                <Pencil className="h-3 w-3" aria-hidden />
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onDelete(task)}
+                aria-label={`Delete ${task.title}`}
+                className="rounded-md p-1 text-ink-subtle hover:bg-critical-soft hover:text-critical"
+              >
+                <Trash2 className="h-3 w-3" aria-hidden />
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
 
@@ -182,26 +195,29 @@ function TaskCard({
       {/*
        * The keyboard- and touch-accessible equivalent of dragging the card. Native
        * drag events fire for neither, so without this the board would be usable
-       * only with a mouse.
+       * only with a mouse. Omitted entirely without `tasks:write`, since moving a
+       * card is exactly the action that permission withholds.
        */}
-      <div className="mt-2">
-        <label htmlFor={`move-${task.id}`} className="sr-only">
-          Move {task.title} to column
-        </label>
-        <select
-          id={`move-${task.id}`}
-          value={task.status}
-          disabled={busy}
-          onChange={(event) => onMove(task.id, event.target.value as TaskStatus)}
-          className="w-full rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink-muted disabled:cursor-not-allowed"
-        >
-          {COLUMNS.map((column) => (
-            <option key={column.status} value={column.status}>
-              Move to {column.title}
-            </option>
-          ))}
-        </select>
-      </div>
+      {canWrite ? (
+        <div className="mt-2">
+          <label htmlFor={`move-${task.id}`} className="sr-only">
+            Move {task.title} to column
+          </label>
+          <select
+            id={`move-${task.id}`}
+            value={task.status}
+            disabled={busy}
+            onChange={(event) => onMove(task.id, event.target.value as TaskStatus)}
+            className="w-full rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink-muted disabled:cursor-not-allowed"
+          >
+            {COLUMNS.map((column) => (
+              <option key={column.status} value={column.status}>
+                Move to {column.title}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -210,10 +226,16 @@ export function TaskBoard({
   tasks,
   options,
   now,
+  canWrite,
 }: {
   tasks: TaskDto[];
   options: TaskFormOptions;
   now: Date;
+  /**
+   * `tasks:write`, resolved on the server from the role matrix. Presentation only —
+   * every mutation below calls a Server Function that checks it again.
+   */
+  canWrite: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -276,17 +298,19 @@ export function TaskBoard({
         </div>
       ) : null}
 
-      <div className="mb-4 flex justify-end">
-        <Button
-          variant="primary"
-          onClick={() => {
-            setDialogTask(null);
-            setDialogOpen(true);
-          }}
-        >
-          New Task
-        </Button>
-      </div>
+      {canWrite ? (
+        <div className="mb-4 flex justify-end">
+          <Button
+            variant="primary"
+            onClick={() => {
+              setDialogTask(null);
+              setDialogOpen(true);
+            }}
+          >
+            New Task
+          </Button>
+        </div>
+      ) : null}
 
       <div className="flex gap-4 overflow-x-auto pb-4">
         {COLUMNS.map((column) => {
@@ -330,6 +354,7 @@ export function TaskBoard({
                           setDialogOpen(true);
                         }}
                         onDragStart={onDragStart}
+                        canWrite={canWrite}
                         onMove={move}
                         onDelete={remove}
                       />
@@ -342,13 +367,15 @@ export function TaskBoard({
         })}
       </div>
 
-      <TaskDialog
-        key={dialogTask?.id ?? "new"}
-        open={dialogOpen}
-        task={dialogTask}
-        options={options}
-        onClose={() => setDialogOpen(false)}
-      />
+      {canWrite ? (
+        <TaskDialog
+          key={dialogTask?.id ?? "new"}
+          open={dialogOpen}
+          task={dialogTask}
+          options={options}
+          onClose={() => setDialogOpen(false)}
+        />
+      ) : null}
     </>
   );
 }

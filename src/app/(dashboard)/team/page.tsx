@@ -1,7 +1,8 @@
-import { CheckCircle2, ClipboardList, UserCheck, Users } from "lucide-react";
+import { CheckCircle2, ClipboardList, ShieldCheck, UserCheck, Users } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { TeamDirectory } from "@/components/team/team-directory";
+import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/states";
 import { StatCard } from "@/components/ui/stat-card";
@@ -25,7 +26,21 @@ export default async function TeamPage() {
   const result = await safeQuery("team", () => listTeamMembers({}));
 
   const header = (
-    <PageHeader title="Team" description="Manage team members and view their activity" />
+    <PageHeader
+      title="Team"
+      description="Manage team members and view their activity"
+      actions={
+        /*
+         * Shown to anyone with `team:read`, because the matrix is worth being able
+         * to consult even when you cannot change it — the page itself renders
+         * read-only without `team:manage`.
+         */
+        <ButtonLink href="/team/permissions" variant="secondary">
+          <ShieldCheck aria-hidden />
+          Roles &amp; Permissions
+        </ButtonLink>
+      }
+    />
   );
 
   if (!result.ok) {

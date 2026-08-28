@@ -10,13 +10,14 @@ import type {
 import type { TaskBoardStats, TaskDto, TaskFormOptions } from "@/features/tasks/task.types";
 import { TaskPriority, TaskStatus } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/api/errors";
-import { requireSession } from "@/lib/auth/session";
+import { requirePermission } from "@/lib/auth/session";
 import { logger } from "@/lib/logger";
 
 /**
  * Business logic for the Task domain, and the authorization choke point for it —
- * every exported function calls `requireSession()` before touching the database,
- * for the reason described in client.service.ts.
+ * every exported function calls `requirePermission()` before touching the database
+ * (`tasks:read` to look, `tasks:write` to change), for the reason described in
+ * client.service.ts.
  */
 
 function dateToIso(value: Date | null): string | null {
@@ -62,7 +63,7 @@ function assertSingleLink(input: { opportunityId?: string | null; clientId?: str
 }
 
 export async function listTasks(query: ListTasksQuery): Promise<TaskDto[]> {
-  await requireSession();
+  await requirePermission("tasks:read");
 
   const rows = await repository.findManyTasks(query);
   return rows.map(toDto);
@@ -92,12 +93,12 @@ export function summarizeTasks(tasks: TaskDto[], now: Date): TaskBoardStats {
 }
 
 export async function getTaskFormOptions(): Promise<TaskFormOptions> {
-  await requireSession();
+  await requirePermission("tasks:read");
   return repository.findFormOptions();
 }
 
 export async function createTask(input: CreateTaskInput): Promise<TaskDto> {
-  const session = await requireSession();
+  const session = await requirePermission("tasks:write");
   assertSingleLink(input);
 
   const row = await repository.createTask(input, session.userId);
@@ -107,7 +108,7 @@ export async function createTask(input: CreateTaskInput): Promise<TaskDto> {
 }
 
 export async function updateTask(id: string, input: UpdateTaskInput): Promise<TaskDto> {
-  await requireSession();
+  await requirePermission("tasks:write");
   assertSingleLink(input);
 
   const existing = await repository.findTaskById(id);
@@ -121,7 +122,7 @@ export async function updateTask(id: string, input: UpdateTaskInput): Promise<Ta
 
 /** Column change from a drag, or from the card's status control. */
 export async function moveTask(id: string, status: TaskStatus): Promise<TaskDto> {
-  await requireSession();
+  await requirePermission("tasks:write");
 
   const existing = await repository.findTaskById(id);
   if (!existing) throw AppError.notFound("Task", id);
@@ -133,7 +134,7 @@ export async function moveTask(id: string, status: TaskStatus): Promise<TaskDto>
 }
 
 export async function deleteTask(id: string): Promise<void> {
-  await requireSession();
+  await requirePermission("tasks:write");
 
   const existing = await repository.findTaskById(id);
   if (!existing) throw AppError.notFound("Task", id);

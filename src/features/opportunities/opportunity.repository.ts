@@ -15,6 +15,9 @@ import { prisma } from "@/lib/db/prisma";
  */
 
 const opportunityDetailInclude = {
+  // Name only, for the same reason as the summary select: the DTO reaches the
+  // browser, and the owner's email is not the card's business.
+  assignedTo: { select: { name: true } },
   naicsCodes: { orderBy: [{ isPrimary: "desc" }, { code: "asc" }] },
   pscCodes: { orderBy: { code: "asc" } },
   attachments: { orderBy: { createdAt: "asc" } },
@@ -38,6 +41,11 @@ const opportunitySummarySelect = {
   contractType: true,
   estimatedValueMin: true,
   estimatedValueMax: true,
+  assignedToId: true,
+  assignedAt: true,
+  // Name only. The card shows who holds the record; it has no need for their
+  // email, and a DTO that carried one would put it in the RSC payload.
+  assignedTo: { select: { name: true } },
   naicsCodes: { select: { code: true, isPrimary: true } },
   matches: { select: { overallScore: true } },
 } satisfies Prisma.OpportunitySelect;
@@ -64,8 +72,42 @@ function buildListOrderBy(
   return [{ responseDeadline: { sort: "asc", nulls: "last" } }, { postedDate: "desc" }];
 }
 
-function buildListWhere(query: ListOpportunitiesQuery, now: Date): Prisma.OpportunityWhereInput {
+/**
+ * Whose queue a listing is about.
+ *
+ * Resolved by the service, not here: every variant that names a user takes the id
+ * as data, so the repository never needs to know who is asking. `undefined` means
+ * no ownership restriction at all.
+ */
+export type AssignmentScope =
+  /** Nobody has claimed it — the shared inbox. */
+  | { kind: "unclaimed" }
+  /** One person's queue. */
+  | { kind: "owner"; userId: string }
+  /** Claimed, but by anybody other than this user — the team overview. */
+  | { kind: "claimedByOthers"; userId: string }
+  | undefined;
+
+function assignmentFilter(scope: AssignmentScope): Prisma.OpportunityWhereInput | null {
+  if (!scope) return null;
+
+  if (scope.kind === "unclaimed") return { assignedToId: null };
+  if (scope.kind === "owner") return { assignedToId: scope.userId };
+
+  // `not: null` as well as `not: userId` — Postgres would drop the NULL rows on the
+  // inequality alone, but stating both makes the intent survive a rewrite.
+  return { AND: [{ assignedToId: { not: null } }, { assignedToId: { not: scope.userId } }] };
+}
+
+function buildListWhere(
+  query: ListOpportunitiesQuery,
+  now: Date,
+  scope: AssignmentScope,
+): Prisma.OpportunityWhereInput {
   const filters: Prisma.OpportunityWhereInput[] = [];
+
+  const assignment = assignmentFilter(scope);
+  if (assignment) filters.push(assignment);
 
   if (query.source) filters.push({ source: query.source });
   if (query.status) filters.push({ status: query.status });
@@ -99,8 +141,9 @@ function buildListWhere(query: ListOpportunitiesQuery, now: Date): Prisma.Opport
 export async function findManyOpportunities(
   query: ListOpportunitiesQuery,
   now: Date,
+  scope: AssignmentScope = undefined,
 ): Promise<{ rows: OpportunitySummaryRow[]; total: number }> {
-  const where = buildListWhere(query, now);
+  const where = buildListWhere(query, now, scope);
 
   const [rows, total] = await Promise.all([
     prisma.opportunity.findMany({
@@ -171,6 +214,35 @@ export async function updateOpportunityStatus(
     data: { status: input.status },
     include: opportunityDetailInclude,
   });
+}
+
+/**
+ * Takes an opportunity into someone's queue, or returns it to the inbox.
+ *
+ * Status and ownership move together in one statement so a record can never be
+ * observed as claimed-but-still-NEW, or released-but-still-INTERESTED.
+ */
+export async function setOpportunityOwner(
+  id: string,
+  assignedToId: string | null,
+  status: UpdateOpportunityStatusInput["status"],
+  now: Date,
+): Promise<OpportunityDetailRow> {
+  return prisma.opportunity.update({
+    where: { id },
+    data: {
+      assignedToId,
+      // Cleared on release, so the column never claims a hand-off that was undone.
+      assignedAt: assignedToId === null ? null : now,
+      status,
+    },
+    include: opportunityDetailInclude,
+  });
+}
+
+/** How many opportunities sit in one person's queue. */
+export async function countOpportunitiesForOwner(assignedToId: string): Promise<number> {
+  return prisma.opportunity.count({ where: { assignedToId } });
 }
 
 export async function countOpportunitiesByStatus(): Promise<Record<string, number>> {

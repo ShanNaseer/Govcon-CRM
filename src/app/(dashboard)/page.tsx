@@ -31,6 +31,7 @@ import type {
   DashboardDeadlineDto,
   DashboardOpportunityDto,
 } from "@/features/opportunities/opportunity.types";
+import { requireUser } from "@/lib/auth/session";
 import { safeQuery } from "@/lib/db/safe-query";
 import { cn, formatDate, formatMillions } from "@/lib/utils";
 
@@ -135,6 +136,16 @@ function AwardRow({
 }
 
 export default async function DashboardPage() {
+  /*
+   * `requirePagePermission` deliberately NOT used here, even though the data below
+   * needs `dashboard:read`. Its redirect target is this page, so a role that lacked
+   * the grant would bounce from "/" to "/" forever. `ALWAYS_GRANTED` in
+   * permissions.ts is what makes that unreachable — it pins `dashboard:read` on for
+   * every role precisely so this page always has a floor to land on. The service
+   * still checks the permission at the data, which is the boundary that matters.
+   */
+  await requireUser();
+
   const now = new Date();
 
   const result = await safeQuery("dashboard", async () => {

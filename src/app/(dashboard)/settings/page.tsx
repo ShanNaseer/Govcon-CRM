@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader, DefinitionList, DefinitionRow } from "@/components/ui/card";
+import { requirePagePermission } from "@/lib/auth/session";
 import { isStorageConfigured } from "@/lib/env";
 
 export const metadata = { title: "Settings" };
@@ -13,7 +14,15 @@ export const dynamic = "force-dynamic";
  * Reports only whether each integration is configured — never the values. Region,
  * bucket names and connection strings stay server-side.
  */
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  /*
+   * This page reads no records, so there is no service beneath it to hold the check
+   * — the gate here IS the boundary for `settings:read`, not a courtesy on top of
+   * one. It also stops the deployment's integration status being readable by a role
+   * whose Settings entry has been switched off in the matrix.
+   */
+  await requirePagePermission("settings:read");
+
   const storageReady = isStorageConfigured();
 
   return (

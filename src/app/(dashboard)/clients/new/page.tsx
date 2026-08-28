@@ -1,6 +1,6 @@
 import { ClientForm } from "@/components/clients/client-form";
 import { PageHeader } from "@/components/layout/page-header";
-import { requireUser } from "@/lib/auth/session";
+import { requirePagePermission } from "@/lib/auth/session";
 
 export const metadata = { title: "Add Client" };
 
@@ -8,9 +8,9 @@ export const metadata = { title: "Add Client" };
 export const dynamic = "force-dynamic";
 
 export default async function NewClientPage() {
-  // The write itself is authorized in the service layer; this only stops an
-  // unauthenticated visitor being shown a form they could never submit.
-  await requireUser();
+  // The write itself is authorized in the service layer; this only stops someone
+  // without `clients:write` being shown a form they could never submit.
+  await requirePagePermission("clients:write");
 
   return (
     <>

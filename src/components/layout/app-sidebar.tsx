@@ -19,10 +19,29 @@ import { cn } from "@/lib/utils";
  * by `AppShell` because the header's hamburger toggles it too.
  */
 
-function isActive(pathname: string, item: NavItem): boolean {
-  if (!item.implemented) return false;
-  if (item.href === "/") return pathname === "/";
-  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+/**
+ * Longest matching href wins.
+ *
+ * A plain prefix test would light up both "Team" (/team) and "Roles & Permissions"
+ * (/team/permissions) on the nested route. Comparing against the best match across
+ * the whole nav keeps exactly one row highlighted whenever one entry sits under
+ * another.
+ */
+function activeHref(pathname: string, items: NavItem[]): string | null {
+  let best: string | null = null;
+
+  for (const item of items) {
+    if (!item.implemented) continue;
+
+    const matches =
+      item.href === "/"
+        ? pathname === "/"
+        : pathname === item.href || pathname.startsWith(`${item.href}/`);
+
+    if (matches && (best === null || item.href.length > best.length)) best = item.href;
+  }
+
+  return best;
 }
 
 export function AppSidebar({
@@ -58,6 +77,15 @@ export function AppSidebar({
     ),
   })).filter((section) => section.items.length > 0);
 
+  /*
+   * Resolved across every visible entry rather than per row, so nesting one route
+   * under another cannot highlight both.
+   */
+  const currentHref = activeHref(
+    pathname,
+    visibleSections.flatMap((section) => section.items),
+  );
+
   return (
     <aside
       className={cn(
@@ -86,7 +114,7 @@ export function AppSidebar({
 
               <ul className="space-y-1">
                 {section.items.map((item) => {
-                  const active = isActive(pathname, item);
+                  const active = item.implemented && item.href === currentHref;
                   const Icon = item.icon;
 
                   return (

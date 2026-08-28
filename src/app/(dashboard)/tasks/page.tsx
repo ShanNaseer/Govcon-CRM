@@ -8,6 +8,7 @@ import { ErrorState } from "@/components/ui/states";
 import { StatCard } from "@/components/ui/stat-card";
 import { listTasksQuerySchema } from "@/features/tasks/task.schemas";
 import { getTaskFormOptions, listTasks, summarizeTasks } from "@/features/tasks/task.service";
+import { requirePagePermission, sessionHasPermission } from "@/lib/auth/session";
 import { safeQuery } from "@/lib/db/safe-query";
 
 export const metadata = { title: "Tasks" };
@@ -15,6 +16,14 @@ export const metadata = { title: "Tasks" };
 export const dynamic = "force-dynamic";
 
 export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
+  /*
+   * Redirects to the dashboard when the role no longer holds this grant, so a
+   * revoked permission reads as "not your page" rather than as an error card. The
+   * service checks it again at the data — this is the courtesy, not the boundary.
+   */
+  const session = await requirePagePermission("tasks:read");
+  const canWrite = sessionHasPermission(session, "tasks:write");
+
   const params = await searchParams;
   const now = new Date();
 
@@ -100,7 +109,7 @@ export default async function TasksPage({ searchParams }: PageProps<"/tasks">) {
       </div>
 
       <div className="mt-6">
-        <TaskBoard tasks={tasks} options={options} now={now} />
+        <TaskBoard tasks={tasks} options={options} now={now} canWrite={canWrite} />
       </div>
     </>
   );

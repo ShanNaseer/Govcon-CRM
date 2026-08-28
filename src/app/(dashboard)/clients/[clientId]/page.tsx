@@ -8,6 +8,7 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { Tabs, resolveActiveTab, type TabDefinition } from "@/components/ui/tabs";
 import { findClientById } from "@/features/clients/client.service";
 import { KeywordType } from "@/generated/prisma/enums";
+import { requirePagePermission } from "@/lib/auth/session";
 import { safeQuery } from "@/lib/db/safe-query";
 import { formatCurrencyRange, formatDate } from "@/lib/utils";
 
@@ -34,6 +35,13 @@ export default async function ClientDetailPage({
   params,
   searchParams,
 }: PageProps<"/clients/[clientId]">) {
+  /*
+   * Redirects to the dashboard when the role no longer holds this grant, so a
+   * revoked permission reads as "not your page" rather than as an error card. The
+   * service checks it again at the data — this is the courtesy, not the boundary.
+   */
+  await requirePagePermission("clients:read");
+
   const { clientId } = await params;
   const { tab } = await searchParams;
 

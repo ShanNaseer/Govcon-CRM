@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 
+import * as rolePermissions from "@/features/team/role-permissions.service";
 import {
   changeRoleSchema,
   createTeamMemberSchema,
   resetPasswordSchema,
   setActiveSchema,
+  setRolePermissionSchema,
 } from "@/features/team/team.schemas";
 import * as service from "@/features/team/team.service";
 import { AppError } from "@/lib/api/errors";
@@ -124,6 +126,50 @@ export async function setActiveAction(
   }
 
   revalidatePath("/team");
+  return { ok: true };
+}
+
+export async function setRolePermissionAction(
+  role: string,
+  permission: string,
+  enabled: boolean,
+): Promise<TeamMutationResult> {
+  const parsed = setRolePermissionSchema.safeParse({ role, permission, enabled });
+  if (!parsed.success) return { ok: false, error: "That permission is not valid." };
+
+  try {
+    await rolePermissions.setRolePermission(
+      parsed.data.role,
+      parsed.data.permission,
+      parsed.data.enabled,
+    );
+  } catch (error) {
+    if (error instanceof AppError) return { ok: false, error: error.message };
+
+    logger.error("Set role permission failed", describeError(error));
+    return { ok: false, error: "Could not save that permission. Please try again." };
+  }
+
+  /*
+   * The whole layout, not just this route: the sidebar is rendered by the dashboard
+   * layout from the viewer's permissions, so an editor who has just changed their
+   * own role's access needs the nav rebuilt, not only the matrix.
+   */
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+export async function resetRolePermissionsAction(): Promise<TeamMutationResult> {
+  try {
+    await rolePermissions.resetRolePermissions();
+  } catch (error) {
+    if (error instanceof AppError) return { ok: false, error: error.message };
+
+    logger.error("Reset role permissions failed", describeError(error));
+    return { ok: false, error: "Could not restore the defaults. Please try again." };
+  }
+
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 

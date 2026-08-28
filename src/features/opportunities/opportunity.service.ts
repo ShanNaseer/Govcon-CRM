@@ -24,15 +24,21 @@ import type {
   OpportunitySummaryDto,
   PipelineStageDto,
 } from "@/features/opportunities/opportunity.types";
+import { listAssignableOwners } from "@/features/team/team.service";
 import { OpportunityStatus } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/api/errors";
-import { requireSession } from "@/lib/auth/session";
+import { requirePermission } from "@/lib/auth/session";
 import { logger } from "@/lib/logger";
 
 /**
  * Business logic for the Opportunity domain, and the authorization choke point
  * for it — see the note in client.service.ts for why the check lives here rather
  * than in the dashboard layout.
+ *
+ * `opportunities:read` to look, `opportunities:write` to triage or edit. The one
+ * exception is `getDashboardStats`, which requires `dashboard:read`: it is the home
+ * page's own summary, so it belongs to the page the caller is on rather than to the
+ * opportunity list they may not be allowed to open.
  */
 
 /** Overall score at or above which a match counts as "strong" on the dashboard. */
@@ -112,6 +118,9 @@ function toSummaryDto(row: OpportunitySummaryRow, now: Date): OpportunitySummary
     isNew:
       row.postedDate !== null &&
       now.getTime() - row.postedDate.getTime() <= NEW_FOR_DAYS * 86_400_000,
+    assignedToId: row.assignedToId,
+    assignedToName: row.assignedTo?.name ?? null,
+    assignedAt: dateToIso(row.assignedAt),
   };
 }
 
@@ -138,6 +147,9 @@ function toDetailDto(row: OpportunityDetailRow): OpportunityDetailDto {
     placeCountry: row.placeCountry,
     status: row.status,
     sourceStatus: row.sourceStatus,
+    assignedToId: row.assignedToId,
+    assignedToName: row.assignedTo?.name ?? null,
+    assignedAt: dateToIso(row.assignedAt),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
 
@@ -223,13 +235,47 @@ function sortInMemory(items: OpportunitySummaryDto[], sort: OpportunitySort): Op
   return items;
 }
 
+/**
+ * Which slice of the pipeline a listing covers.
+ *
+ * `"inbox"`      — unclaimed only. What the triage inbox is: a record leaves it by
+ *                  being taken into someone's queue, not by changing status.
+ * `"mine"`       — the signed-in user's queue.
+ * `"team"`       — claimed by anyone else. Needs `opportunities:assign`, since it
+ *                  shows what other people are working on.
+ * `"all"`        — no ownership restriction, for the dashboard and the API.
+ *
+ * Resolved to a repository filter here rather than accepted as a query parameter,
+ * because "mine" and "team" are relative to the session's user and a caller must
+ * not be able to ask for somebody else's queue by editing a URL.
+ */
+export type OpportunityScope = "inbox" | "mine" | "team" | "all";
+
 export async function listOpportunities(
   query: ListOpportunitiesQuery,
   now: Date = new Date(),
+  scope: OpportunityScope = "all",
 ): Promise<OpportunityListResult> {
-  await requireSession();
+  const session = await requirePermission("opportunities:read");
 
-  const { rows, total } = await repository.findManyOpportunities(query, now);
+  /*
+   * The team overview shows who else is holding what, so it is gated on the grant
+   * that means "may move work between people" rather than on plain read access.
+   */
+  if (scope === "team" && !session.permissions.includes("opportunities:assign")) {
+    throw AppError.forbidden("Your role does not allow viewing other people's queues");
+  }
+
+  const assignment: repository.AssignmentScope =
+    scope === "inbox"
+      ? { kind: "unclaimed" }
+      : scope === "mine"
+        ? { kind: "owner", userId: session.userId }
+        : scope === "team"
+          ? { kind: "claimedByOthers", userId: session.userId }
+          : undefined;
+
+  const { rows, total } = await repository.findManyOpportunities(query, now, assignment);
 
   let items = rows.map((row) => toSummaryDto(row, now));
 
@@ -277,7 +323,7 @@ export function summarizeInbox(items: OpportunitySummaryDto[], now: Date): Oppor
 }
 
 export async function getOpportunityById(id: string): Promise<OpportunityDetailDto> {
-  await requireSession();
+  await requirePermission("opportunities:read");
 
   const row = await repository.findOpportunityById(id);
   if (!row) throw AppError.notFound("Opportunity", id);
@@ -285,7 +331,7 @@ export async function getOpportunityById(id: string): Promise<OpportunityDetailD
 }
 
 export async function findOpportunityById(id: string): Promise<OpportunityDetailDto | null> {
-  await requireSession();
+  await requirePermission("opportunities:read");
 
   const row = await repository.findOpportunityById(id);
   return row ? toDetailDto(row) : null;
@@ -299,7 +345,7 @@ export async function findOpportunityById(id: string): Promise<OpportunityDetail
  * The eventual ingestion pipeline will upsert here instead of failing.
  */
 export async function createOpportunity(input: CreateOpportunityInput): Promise<OpportunityDetailDto> {
-  await requireSession();
+  await requirePermission("opportunities:write");
   assertConsistentInput(input);
 
   const existing = await repository.findOpportunityByExternalId(input.source, input.externalId);
@@ -317,7 +363,7 @@ export async function updateOpportunityStatus(
   id: string,
   input: UpdateOpportunityStatusInput,
 ): Promise<OpportunityDetailDto> {
-  await requireSession();
+  await requirePermission("opportunities:write");
 
   const existing = await repository.findOpportunityById(id);
   if (!existing) throw AppError.notFound("Opportunity", id);
@@ -326,6 +372,153 @@ export async function updateOpportunityStatus(
 
   logger.info("Opportunity status changed", { opportunityId: id, status: input.status });
   return toDetailDto(row);
+}
+
+/**
+ * Takes an opportunity out of the shared inbox and into the caller's queue.
+ *
+ * Always the caller's own queue — there is no user parameter, so no request can
+ * push work onto somebody else by editing an id. Assigning to another person is a
+ * different capability and would need its own permission.
+ *
+ * Claiming an already-claimed record is refused rather than silently reassigned:
+ * two people triaging the same inbox will occasionally click the same card, and the
+ * second one needs to be told the first got there rather than quietly taking it.
+ */
+export async function claimOpportunity(
+  id: string,
+  now: Date = new Date(),
+): Promise<OpportunityDetailDto> {
+  const session = await requirePermission("opportunities:write");
+
+  const existing = await repository.findOpportunityById(id);
+  if (!existing) throw AppError.notFound("Opportunity", id);
+
+  if (existing.assignedToId !== null) {
+    if (existing.assignedToId === session.userId) {
+      throw AppError.validation("That opportunity is already in your queue.");
+    }
+    throw AppError.conflict("Someone else has already taken that opportunity into their queue.");
+  }
+
+  /*
+   * INTERESTED, the same status the button set before ownership existed: taking
+   * something into your queue is a statement of intent to pursue, ahead of a full
+   * qualification. The status is what the pipeline panel reads; the assignment is
+   * what "My Queue" reads.
+   */
+  const row = await repository.setOpportunityOwner(
+    id,
+    session.userId,
+    OpportunityStatus.INTERESTED,
+    now,
+  );
+
+  logger.info("Opportunity claimed", { opportunityId: id, userId: session.userId });
+  return toDetailDto(row);
+}
+
+/**
+ * Hands an opportunity to somebody else's queue.
+ *
+ * Distinct from `claimOpportunity`, and gated on a distinct permission: taking work
+ * for yourself is ordinary triage, putting it on another person's desk is a
+ * supervisory act. `opportunities:assign` is a row in the permission matrix, so which
+ * roles may do it is configurable rather than hard-coded to Administrator.
+ *
+ * Reassignment from an existing owner is allowed — that IS the feature — but it is
+ * logged with both parties, because silently moving someone's work is the kind of
+ * thing that needs a trail.
+ */
+export async function assignOpportunityTo(
+  id: string,
+  assigneeId: string,
+  now: Date = new Date(),
+): Promise<OpportunityDetailDto> {
+  const session = await requirePermission("opportunities:assign");
+
+  const existing = await repository.findOpportunityById(id);
+  if (!existing) throw AppError.notFound("Opportunity", id);
+
+  /*
+   * The assignee is validated against the same list the picker was built from, not
+   * merely checked for existence: a replayed call must not be able to park work on a
+   * deactivated account, or on someone whose role cannot open a queue.
+   */
+  const assignable = await listAssignableOwners();
+  const assignee = assignable.find((candidate) => candidate.id === assigneeId);
+
+  if (!assignee) {
+    throw AppError.validation(
+      "That person cannot be given opportunities. They may be deactivated, or their role may not allow opportunity access.",
+    );
+  }
+
+  if (existing.assignedToId === assigneeId) {
+    throw AppError.validation(`This is already in ${assignee.name}'s queue.`);
+  }
+
+  const row = await repository.setOpportunityOwner(
+    id,
+    assigneeId,
+    OpportunityStatus.INTERESTED,
+    now,
+  );
+
+  logger.info("Opportunity assigned", {
+    opportunityId: id,
+    assignedTo: assigneeId,
+    previousOwner: existing.assignedToId,
+    assignedBy: session.userId,
+  });
+  return toDetailDto(row);
+}
+
+/**
+ * Returns an opportunity from a queue to the shared inbox.
+ *
+ * The inverse of `claimOpportunity`, so a misclick is recoverable. Status goes back
+ * to REVIEWING rather than NEW — it has been looked at, and resetting it to NEW
+ * would misreport it as untriaged in the "Unreviewed" count.
+ *
+ * Only the holder may release, unless the caller holds `opportunities:assign`:
+ * taking work off someone else's desk is the same supervisory act as putting it
+ * there, so it answers to the same grant.
+ */
+export async function releaseOpportunity(
+  id: string,
+  now: Date = new Date(),
+): Promise<OpportunityDetailDto> {
+  const session = await requirePermission("opportunities:write");
+
+  const existing = await repository.findOpportunityById(id);
+  if (!existing) throw AppError.notFound("Opportunity", id);
+
+  if (existing.assignedToId === null) {
+    throw AppError.validation("That opportunity is not in anyone's queue.");
+  }
+
+  if (
+    existing.assignedToId !== session.userId &&
+    !session.permissions.includes("opportunities:assign")
+  ) {
+    throw AppError.forbidden("Only the person holding an opportunity can return it to the inbox.");
+  }
+
+  const row = await repository.setOpportunityOwner(id, null, OpportunityStatus.REVIEWING, now);
+
+  logger.info("Opportunity released", {
+    opportunityId: id,
+    previousOwner: existing.assignedToId,
+    releasedBy: session.userId,
+  });
+  return toDetailDto(row);
+}
+
+/** How many opportunities sit in the caller's queue — for the sidebar count. */
+export async function countMyQueue(): Promise<number> {
+  const session = await requirePermission("opportunities:read");
+  return repository.countOpportunitiesForOwner(session.userId);
 }
 
 /**
@@ -461,7 +654,7 @@ function bucketDeadlines(
 }
 
 export async function getDashboardStats(now: Date = new Date()): Promise<OpportunityDashboardStats> {
-  await requireSession();
+  await requirePermission("dashboard:read");
 
   const [aggregates, strongMatchCount, closingSoonCount, recentAwards, awardForecast, deadlineRows] =
     await Promise.all([

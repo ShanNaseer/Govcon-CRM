@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import { AppShell } from "@/components/layout/app-shell";
-import { permissionsForRole, ROLE_LABELS } from "@/lib/auth/permissions";
+import { ROLE_LABELS } from "@/lib/auth/permissions";
 import { requireUser } from "@/lib/auth/session";
 
 /**
@@ -13,6 +13,10 @@ import { requireUser } from "@/lib/auth/session";
  * from rendering. The enforcement that matters happens at the data source — every
  * function in src/features/**\/*.service.ts calls `requireSession()` before it
  * touches the database, so no page can serve records by omitting a check.
+ *
+ * `session.permissions` comes from the editable role matrix, resolved per request —
+ * so a permission granted or revoked in /team/permissions changes the sidebar on
+ * the affected users' next navigation, with no sign-out required.
  */
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const session = await requireUser();
@@ -23,7 +27,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       userEmail={session.email}
       userName={session.name}
       userRole={ROLE_LABELS[session.role]}
-      permissions={permissionsForRole(session.role)}
+      permissions={session.permissions}
     >
       {children}
     </AppShell>

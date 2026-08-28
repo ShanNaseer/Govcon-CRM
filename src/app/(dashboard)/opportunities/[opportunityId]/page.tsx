@@ -12,6 +12,7 @@ import { Card, CardBody, CardHeader, DefinitionList, DefinitionRow } from "@/com
 import { ChipList } from "@/components/ui/chip-list";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { findOpportunityById } from "@/features/opportunities/opportunity.service";
+import { requirePagePermission } from "@/lib/auth/session";
 import { safeQuery } from "@/lib/db/safe-query";
 import { daysUntil, formatCurrencyRange, formatDate, humanizeEnum } from "@/lib/utils";
 
@@ -34,6 +35,13 @@ function formatFileSize(bytes: number | null): string {
 export default async function OpportunityDetailPage({
   params,
 }: PageProps<"/opportunities/[opportunityId]">) {
+  /*
+   * Redirects to the dashboard when the role no longer holds this grant, so a
+   * revoked permission reads as "not your page" rather than as an error card. The
+   * service checks it again at the data — this is the courtesy, not the boundary.
+   */
+  await requirePagePermission("opportunities:read");
+
   const { opportunityId } = await params;
   const now = new Date();
 

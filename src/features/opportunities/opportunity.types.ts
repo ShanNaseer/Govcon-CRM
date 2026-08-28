@@ -78,6 +78,15 @@ export type OpportunitySummaryDto = {
   reviewState: OpportunityReviewState;
   /** Posted within the last week — drives the NEW flag on the card. */
   isNew: boolean;
+  /**
+   * Who has this in their queue. Null means unclaimed, which is what puts the
+   * record in the shared inbox.
+   */
+  assignedToId: string | null;
+  /** Their display name, for the card's owner chip. Null when unclaimed. */
+  assignedToName: string | null;
+  /** ISO 8601 of when it was claimed, or null. */
+  assignedAt: string | null;
 };
 
 /** Counts backing the opportunities inbox summary row. */

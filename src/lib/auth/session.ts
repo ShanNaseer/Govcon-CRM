@@ -7,7 +7,8 @@ import { redirect } from "next/navigation";
 
 import { prisma } from "@/lib/db/prisma";
 import { UserRole } from "@/generated/prisma/enums";
-import { roleHasPermission, type Permission } from "@/lib/auth/permissions";
+import type { Permission } from "@/lib/auth/permissions";
+import { getRolePermissionMap } from "@/lib/auth/role-permissions";
 
 /**
  * Authentication boundary.
@@ -51,6 +52,16 @@ export type Session = {
   email: string;
   name: string;
   role: UserRole;
+  /**
+   * What the role may do, resolved from the `RolePermission` table on every request.
+   *
+   * Carried on the session rather than looked up at each check so that the callers
+   * that branch on a permission stay synchronous, and so that one request cannot see
+   * two different answers. Resolved live, NOT stored on the session row: an edit to
+   * the permission matrix therefore takes effect on everyone's next request without
+   * having to revoke their sessions.
+   */
+  permissions: readonly Permission[];
   /** `"all"` grants unrestricted access; otherwise the explicit Client allow-list. */
   clientIds: string[] | "all";
 };
@@ -146,12 +157,16 @@ export const getSession = cache(async function getSession(): Promise<Session | n
   // A deactivated user's existing sessions stop working immediately.
   if (!record.user.isActive) return null;
 
+  // Also request-cached, so this costs one extra query per request, not per check.
+  const rolePermissions = await getRolePermissionMap();
+
   return {
     sessionId: record.id,
     userId: record.user.id,
     email: record.user.email,
     name: record.user.name,
     role: record.user.role,
+    permissions: rolePermissions[record.user.role],
     clientIds: record.user.allClients ? "all" : record.user.clientIds,
   };
 });
@@ -201,7 +216,7 @@ export async function requireUser(): Promise<Session> {
 export async function requirePermission(permission: Permission): Promise<Session> {
   const session = await requireSession();
 
-  if (!roleHasPermission(session.role, permission)) {
+  if (!session.permissions.includes(permission)) {
     const { AppError } = await import("@/lib/api/errors");
     throw AppError.forbidden(`Your role does not allow ${permission}`);
   }
@@ -214,19 +229,21 @@ export async function requirePermission(permission: Permission): Promise<Session
  * stale link lands somewhere usable instead of on an error boundary.
  *
  * Unauthenticated callers go to /login via `requireUser`; authenticated ones
- * without the permission go to the dashboard, which every role can read.
+ * without the permission go to the dashboard, which every role can read — see
+ * ALWAYS_GRANTED in permissions.ts, which is what stops this redirecting to a page
+ * the user also cannot see.
  */
 export async function requirePagePermission(permission: Permission): Promise<Session> {
   const session = await requireUser();
 
-  if (!roleHasPermission(session.role, permission)) redirect("/");
+  if (!session.permissions.includes(permission)) redirect("/");
 
   return session;
 }
 
 /** Convenience for UI branching inside an already-loaded page. */
 export function sessionHasPermission(session: Session, permission: Permission): boolean {
-  return roleHasPermission(session.role, permission);
+  return session.permissions.includes(permission);
 }
 
 /** Revokes the current session and clears its cookie. Server Functions only. */

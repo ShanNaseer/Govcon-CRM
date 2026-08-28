@@ -134,6 +134,25 @@ export async function deleteSessionsForUser(userId: string): Promise<number> {
   return count;
 }
 
+/**
+ * Active users, for the "assign to" picker.
+ *
+ * Deactivated accounts are excluded at the query: work handed to someone who cannot
+ * sign in would sit in a queue nobody ever opens. The role comes back so the caller
+ * can drop anyone whose role cannot open a queue at all — that filter needs the
+ * permission map, which is not this layer's business.
+ */
+export async function findActiveMembersForAssignment(): Promise<
+  Array<{ id: string; name: string; role: UserRole; jobTitle: string | null }>
+> {
+  return prisma.user.findMany({
+    where: { isActive: true },
+    select: { id: true, name: true, role: true, jobTitle: true },
+    orderBy: { name: "asc" },
+    take: 500,
+  });
+}
+
 /** Active administrators, so the last one cannot be removed or demoted. */
 export async function countActiveAdmins(): Promise<number> {
   return prisma.user.count({ where: { role: UserRole.ADMIN, isActive: true } });

@@ -12,6 +12,7 @@ import { ErrorState } from "@/components/ui/states";
 import { listOpportunitiesQuerySchema } from "@/features/opportunities/opportunity.schemas";
 import { listOpportunities, summarizeInbox } from "@/features/opportunities/opportunity.service";
 import { OpportunitySourceType } from "@/generated/prisma/enums";
+import { requirePagePermission, sessionHasPermission } from "@/lib/auth/session";
 import { safeQuery } from "@/lib/db/safe-query";
 import { humanizeEnum } from "@/lib/utils";
 
@@ -29,6 +30,14 @@ const SOURCE_OPTIONS: FilterOption[] = [
 ];
 
 export default async function OpportunitiesPage({ searchParams }: PageProps<"/opportunities">) {
+  /*
+   * Redirects to the dashboard when the role no longer holds this grant, so a
+   * revoked permission reads as "not your page" rather than as an error card. The
+   * service checks it again at the data — this is the courtesy, not the boundary.
+   */
+  const session = await requirePagePermission("opportunities:read");
+  const canWrite = sessionHasPermission(session, "opportunities:write");
+
   const params = await searchParams;
   const now = new Date();
 
@@ -41,7 +50,17 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
   );
   const query = parsed.success ? parsed.data : listOpportunitiesQuerySchema.parse({});
 
-  const result = await safeQuery("opportunities-list", () => listOpportunities(query, now));
+  /*
+   * "inbox" scope: unclaimed records only. The inbox is the pool nobody has taken
+   * yet, so assigning a card to a queue removes it from here — and from the summary
+   * counts above the list, which are computed over the same filtered result.
+   *
+   * Not a URL parameter. The scope is what this page IS, so letting a query string
+   * widen it would let anyone browse other people's queues from the inbox.
+   */
+  const result = await safeQuery("opportunities-list", () =>
+    listOpportunities(query, now, "inbox"),
+  );
 
   const header = (
     <div className="mb-6">
@@ -160,7 +179,12 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
 
           <div className="space-y-3">
             {items.map((opportunity) => (
-              <OpportunityCard key={opportunity.id} opportunity={opportunity} now={now} />
+              <OpportunityCard
+                key={opportunity.id}
+                opportunity={opportunity}
+                now={now}
+                canWrite={canWrite}
+              />
             ))}
           </div>
         </>
