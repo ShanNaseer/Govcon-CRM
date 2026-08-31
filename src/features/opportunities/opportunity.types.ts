@@ -72,6 +72,14 @@ export type OpportunitySummaryDto = {
   /** Highest overall score across all clients — the list's "fit score". */
   bestMatchScore: number | null;
   matchCount: number;
+  /** Verdict from the best-scoring client match, or null when nothing is scored. */
+  recommendation: MatchRecommendation | null;
+  /**
+   * Why it matched, from the best-scoring client. Truncated at the source rather
+   * than in the card: the full list can run to a dozen entries and the rest would
+   * only be serialized into the page to be thrown away.
+   */
+  topMatchReasons: string[];
   /** Urgency band derived from fit score and days remaining. */
   priority: OpportunityPriority;
   /** Whether the record has been triaged. NEW means it has not. */

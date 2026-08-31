@@ -11,7 +11,10 @@ import {
 import { SyncOpportunitiesButton } from "@/components/opportunities/sync-opportunities-button";
 import { Card } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/states";
-import { listOpportunitiesQuerySchema } from "@/features/opportunities/opportunity.schemas";
+import {
+  listOpportunitiesQuerySchema,
+  OPPORTUNITY_FIT_THRESHOLDS,
+} from "@/features/opportunities/opportunity.schemas";
 import { getInboxStats, listOpportunities } from "@/features/opportunities/opportunity.service";
 import { getSyncStatus } from "@/features/opportunities/opportunity.sync.service";
 import { OpportunitySourceType } from "@/generated/prisma/enums";
@@ -65,7 +68,33 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
       Object.entries(params).filter(([, value]) => value !== "" && value !== undefined),
     ),
   );
-  const query = parsed.success ? parsed.data : listOpportunitiesQuerySchema.parse({});
+  const parsedQuery = parsed.success ? parsed.data : listOpportunitiesQuerySchema.parse({});
+
+  /*
+   * Two opinionated defaults, both overridable from the filter bar:
+   *
+   *   deadline "open"  — still open for response, and NOT closing today. A closed
+   *                      solicitation cannot be bid and one closing today cannot be
+   *                      worked, so both are noise in a triage queue.
+   *   fit "strong"     — scored at or above the pursue threshold. On an unfiltered
+   *                      government feed the great majority score near zero; listing
+   *                      them recreates the problem the matching engine solves.
+   *
+   * The bar reaches every other combination, so nothing is unreachable.
+   */
+  const fit = parsedQuery.fit ?? ("strong" as const);
+
+  const query = {
+    ...parsedQuery,
+    deadline: parsedQuery.deadline ?? ("open" as const),
+    /*
+     * Translated to the score floor the repository already understands, rather than
+     * teaching it a second vocabulary for the same filter. `any` removes the floor —
+     * which also lets through solicitations with no match row at all, the state a
+     * record sits in between being imported and being scored.
+     */
+    minMatchScore: fit === "any" ? undefined : OPPORTUNITY_FIT_THRESHOLDS[fit],
+  };
 
   /*
    * "inbox" scope: unclaimed records only. The inbox is the pool nobody has taken
@@ -137,6 +166,9 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
     source: query.source ?? "",
     priority: query.priority ?? "",
     review: query.review ?? "",
+    // Empty means the default, which the bar labels "Open (due after today)".
+    deadline: parsedQuery.deadline ?? "",
+    fit: parsedQuery.fit ?? "",
     sort: query.sort,
   };
 
@@ -144,7 +176,9 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
     Boolean(filterState.search) ||
     Boolean(filterState.source) ||
     Boolean(filterState.priority) ||
-    Boolean(filterState.review);
+    Boolean(filterState.review) ||
+    Boolean(filterState.deadline) ||
+    Boolean(filterState.fit);
 
   return (
     <>

@@ -1,9 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Target } from "lucide-react";
 
-import { syncOpportunitiesAction } from "@/app/(dashboard)/opportunities/actions";
+import {
+  runMatchingAction,
+  syncOpportunitiesAction,
+} from "@/app/(dashboard)/opportunities/actions";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils";
@@ -43,6 +46,23 @@ export function SyncOpportunitiesButton({
     );
   }
 
+  /*
+   * Re-scores without re-importing. The separate control exists because editing a
+   * client profile changes the ranking of solicitations already in the database, and
+   * pulling the feed again to see that would be both slow and beside the point.
+   */
+  function rescore() {
+    setMessage(null);
+
+    startTransition(async () => {
+      const result = await runMatchingAction();
+
+      setMessage(
+        result.ok ? { tone: "ok", text: result.summary } : { tone: "error", text: result.error },
+      );
+    });
+  }
+
   function sync() {
     setMessage(null);
 
@@ -65,9 +85,14 @@ export function SyncOpportunitiesButton({
         <span className="text-xs text-ink-subtle">Last synced {formatDate(lastRunAt)}</span>
       ) : null}
 
+      <Button variant="secondary" onClick={rescore} disabled={pending}>
+        <Target aria-hidden />
+        Rescore
+      </Button>
+
       <Button variant="primary" onClick={sync} disabled={pending}>
         <RefreshCw className={cn(pending && "animate-spin")} aria-hidden />
-        {pending ? "Syncing…" : "Sync now"}
+        {pending ? "Working…" : "Sync now"}
       </Button>
 
       {/*

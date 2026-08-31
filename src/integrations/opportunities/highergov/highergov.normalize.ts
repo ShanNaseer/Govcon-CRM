@@ -1,5 +1,6 @@
 import { OpportunitySourceType, OpportunityStatus } from "@/generated/prisma/enums";
 import type { HigherGovOpportunity } from "@/integrations/opportunities/highergov/highergov.types";
+import { redactApiKeyDeep } from "@/integrations/opportunities/highergov/highergov.redact";
 import type { NormalizedOpportunity } from "@/integrations/opportunities/provider.types";
 
 /**
@@ -216,7 +217,13 @@ export function normalizeHigherGovOpportunity(
      * no column for survive — `version_key`, the NSN list, the contacts, the DIBBS
      * flags, and the fact that the record arrived via HigherGov at all.
      */
-    rawData: { provider: "highergov", record: raw },
+    /*
+     * REDACTED BEFORE STORING. `document_path` arrives as a ready-made URL with the
+     * account's live `api_key` in its query string, so keeping the record verbatim
+     * would write a working credential into every row. The rest of the payload is
+     * retained for traceability and re-normalization.
+     */
+    rawData: { provider: "highergov", record: redactApiKeyDeep(raw) },
 
     naicsCodes: naicsCodes(raw),
     pscCodes: pscCodes(raw),

@@ -10,6 +10,7 @@ import {
 } from "@/features/opportunities/opportunity.service";
 import { opportunityIdSchema } from "@/features/opportunities/opportunity.schemas";
 import { syncHigherGovOpportunities } from "@/features/opportunities/opportunity.sync.service";
+import { runMatching } from "@/features/matching/matching.runner";
 import { OpportunityStatus } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/api/errors";
 import { describeError, logger } from "@/lib/logger";
@@ -206,7 +207,28 @@ export async function syncOpportunitiesAction(): Promise<SyncActionResult> {
           ? " Stopped at this run's limit — sync again to continue."
           : "";
 
-    const summary = `${headline}${filtered}${skipped}${remaining}`;
+    /*
+     * Re-score after importing. Newly arrived solicitations are exactly the ones a
+     * capture manager wants ranked, and leaving them unscored until someone remembers
+     * to press a second button means the inbox is stale in the one moment it matters.
+     *
+     * Non-fatal: a matching failure must not present a successful import as a failed
+     * one. The sync already happened and the records are stored either way.
+     */
+    let matchNote = "";
+
+    try {
+      const matched = await runMatching();
+      matchNote =
+        matched.pursue > 0
+          ? ` Scored against ${matched.clientsScored} client profile${matched.clientsScored === 1 ? "" : "s"} — ${matched.pursue} worth pursuing.`
+          : ` Scored against ${matched.clientsScored} client profile${matched.clientsScored === 1 ? "" : "s"}.`;
+    } catch (error) {
+      logger.warn("Sync completed but matching failed", describeError(error));
+      matchNote = " Imported, but scoring against client profiles failed — run it again from the inbox.";
+    }
+
+    const summary = `${headline}${filtered}${skipped}${remaining}${matchNote}`;
 
     revalidateTriageRoutes();
     return { ok: true, summary };
@@ -224,4 +246,34 @@ export async function markReviewed(id: string): Promise<TriageResult> {
 
 export async function passOpportunity(id: string): Promise<TriageResult> {
   return triage("pass", id);
+}
+
+export type MatchingActionResult = { ok: true; summary: string } | { ok: false; error: string };
+
+/**
+ * Re-scores every open opportunity against the client profiles.
+ *
+ * Exposed separately from the sync because the two change for different reasons: a
+ * sync brings in new solicitations, this reflects a change to a CLIENT — new NAICS
+ * codes, a keyword, a set-aside certification. Editing a profile should not require
+ * re-importing the feed to see its effect.
+ */
+export async function runMatchingAction(): Promise<MatchingActionResult> {
+  try {
+    const result = await runMatching();
+
+    const summary =
+      `Scored ${result.opportunitiesConsidered} open opportunit${result.opportunitiesConsidered === 1 ? "y" : "ies"} ` +
+      `against ${result.clientsScored} client profile${result.clientsScored === 1 ? "" : "s"}: ` +
+      `${result.pursue} to pursue, ${result.review} to review, ${result.pass} ruled out.` +
+      (result.truncated ? " Stopped at this run's limit." : "");
+
+    revalidateTriageRoutes();
+    return { ok: true, summary };
+  } catch (error) {
+    if (error instanceof AppError) return { ok: false, error: error.message };
+
+    logger.error("Matching run failed", describeError(error));
+    return { ok: false, error: "Could not score opportunities right now. Please try again." };
+  }
 }

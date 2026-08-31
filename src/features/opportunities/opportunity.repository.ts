@@ -7,6 +7,7 @@ import type {
   ListOpportunitiesQuery,
   UpdateOpportunityStatusInput,
 } from "@/features/opportunities/opportunity.schemas";
+import { startOfNextBusinessDayUtc } from "@/lib/business-date";
 import { prisma } from "@/lib/db/prisma";
 
 /**
@@ -47,7 +48,14 @@ const opportunitySummarySelect = {
   // email, and a DTO that carried one would put it in the RSC payload.
   assignedTo: { select: { name: true } },
   naicsCodes: { select: { code: true, isPrimary: true } },
-  matches: { select: { overallScore: true } },
+  /*
+   * Ordered so the strongest client match is first: the card shows one verdict, and
+   * with several clients it must be the best one rather than an arbitrary one.
+   */
+  matches: {
+    select: { overallScore: true, recommendation: true, matchReasons: true },
+    orderBy: { overallScore: "desc" },
+  },
 } satisfies Prisma.OpportunitySelect;
 
 export type OpportunityDetailRow = Prisma.OpportunityGetPayload<{ include: typeof opportunityDetailInclude }>;
@@ -108,6 +116,21 @@ function buildListWhere(
 
   const assignment = assignmentFilter(scope);
   if (assignment) filters.push(assignment);
+
+  /*
+   * Deadline window. `now` is passed in rather than read here so a list and its
+   * summary counts, computed microseconds apart, cannot disagree about where "today"
+   * falls for a solicitation closing in the next instant.
+   *
+   * "Open" excludes TODAY, not just the past — a solicitation closing today cannot
+   * realistically be worked. Which day counts as today is a timezone question, and
+   * deliberately not answered with the server's UTC clock: see business-date.ts.
+   */
+  const tomorrow = startOfNextBusinessDayUtc(now);
+
+  if (query.deadline === "open") filters.push({ responseDeadline: { gte: tomorrow } });
+  else if (query.deadline === "expired") filters.push({ responseDeadline: { lt: tomorrow } });
+  else if (query.deadline === "undated") filters.push({ responseDeadline: null });
 
   if (query.source) filters.push({ source: query.source });
   if (query.status) filters.push({ status: query.status });

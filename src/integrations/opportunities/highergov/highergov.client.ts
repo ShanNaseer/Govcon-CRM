@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { HigherGovOpportunityPage } from "@/integrations/opportunities/highergov/highergov.types";
+import { redactApiKey } from "@/integrations/opportunities/highergov/highergov.redact";
 import { AppError } from "@/lib/api/errors";
 import { getHigherGovEnv } from "@/lib/env";
 import { logger } from "@/lib/logger";
@@ -55,15 +56,11 @@ export type FetchPageParams = {
 };
 
 /**
- * Strips the API key from anything about to be logged or thrown.
- *
- * The key travels in the query string, so a bare `url` in a log line would persist a
- * live credential to disk. Replacing rather than deleting keeps the log readable —
- * it is still obvious that the parameter was present.
+ * Re-exported so callers that already import from this module keep working. The
+ * implementation is shared with the normalizer — see highergov.redact.ts for why one
+ * rule has to cover both logging and persistence.
  */
-export function redactApiKey(value: string): string {
-  return value.replace(/([?&]api_key=)[^&]*/gi, "$1<redacted>");
-}
+export { redactApiKey };
 
 function buildUrl(params: FetchPageParams): string {
   const env = getHigherGovEnv();

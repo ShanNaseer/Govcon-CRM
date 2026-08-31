@@ -197,6 +197,19 @@ export function OpportunityCard({
                 </span>
               ) : null}
 
+              {/*
+                * Why the engine ranked it, in the meta row rather than a separate
+                * block: the reason is only useful next to the score it explains.
+                */}
+              {opportunity.topMatchReasons.length > 0 ? (
+                <span className="inline-flex min-w-0 items-center gap-1 text-fit-strong">
+                  <Sparkles className="h-3 w-3 shrink-0" aria-hidden />
+                  <span className="max-w-72 truncate" title={opportunity.topMatchReasons.join(" · ")}>
+                    {opportunity.topMatchReasons.join(" · ")}
+                  </span>
+                </span>
+              ) : null}
+
               {opportunity.postedDate ? (
                 <span className="inline-flex shrink-0 items-center gap-1">
                   <Calendar className="h-3 w-3 shrink-0" aria-hidden />

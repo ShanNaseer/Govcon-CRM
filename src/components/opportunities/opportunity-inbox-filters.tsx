@@ -26,11 +26,13 @@ export type InboxFilterState = {
   source: string;
   priority: string;
   review: string;
+  deadline: string;
+  fit: string;
   sort: string;
 };
 
 /** Params this bar owns. Anything else in the URL is preserved untouched. */
-const OWNED_PARAMS = ["search", "source", "priority", "review", "sort"] as const;
+const OWNED_PARAMS = ["search", "source", "priority", "review", "deadline", "fit", "sort"] as const;
 
 const PRIORITY_OPTIONS: FilterOption[] = [
   { value: "", label: "All Priorities" },
@@ -43,6 +45,31 @@ const REVIEW_OPTIONS: FilterOption[] = [
   { value: "", label: "All Status" },
   { value: "unreviewed", label: "Unreviewed" },
   { value: "reviewed", label: "Reviewed" },
+];
+
+/**
+ * Deadline window.
+ *
+ * "Open" is the default and carries no query parameter, so the plain URL shows the
+ * actionable queue. The other three exist so nothing becomes unreachable — an expired
+ * solicitation is still a record someone may need to look up, and 48 in this feed
+ * carry no stated deadline at all.
+ */
+const DEADLINE_OPTIONS: FilterOption[] = [
+  { value: "", label: "Open (due after today)" },
+  { value: "expired", label: "Past deadline" },
+  { value: "undated", label: "No deadline stated" },
+  { value: "all", label: "Any deadline" },
+];
+
+/**
+ * Fit-score band. The default carries no query parameter, so the plain URL is the
+ * shortlist rather than the firehose.
+ */
+const FIT_OPTIONS: FilterOption[] = [
+  { value: "", label: "Strong fit (70%+)" },
+  { value: "review", label: "Worth reviewing (40%+)" },
+  { value: "any", label: "Any fit, including unscored" },
 ];
 
 const SORT_OPTIONS: FilterOption[] = [
@@ -195,7 +222,9 @@ export function OpportunityInboxFilters({
     commit({ search: searchDraft.trim() });
   }
 
-  const activeCount = [state.source, state.priority, state.review].filter(Boolean).length;
+  const activeCount = [state.source, state.priority, state.review, state.deadline, state.fit].filter(
+    Boolean,
+  ).length;
   const hasFilters = Boolean(state.search) || activeCount > 0 || state.sort !== "due-date";
 
   function clearAll() {
@@ -269,6 +298,18 @@ export function OpportunityInboxFilters({
             onSelect={(value) => commit({ review: value })}
           />
           <Dropdown
+            label="Deadline"
+            options={DEADLINE_OPTIONS}
+            value={state.deadline}
+            onSelect={(value) => commit({ deadline: value })}
+          />
+          <Dropdown
+            label="Fit"
+            options={FIT_OPTIONS}
+            value={state.fit}
+            onSelect={(value) => commit({ fit: value })}
+          />
+          <Dropdown
             label="Sort"
             options={SORT_OPTIONS}
             value={state.sort}
@@ -327,6 +368,18 @@ export function OpportunityInboxFilters({
             options={REVIEW_OPTIONS}
             value={state.review}
             onSelect={(value) => commit({ review: value })}
+          />
+          <Dropdown
+            label="Deadline"
+            options={DEADLINE_OPTIONS}
+            value={state.deadline}
+            onSelect={(value) => commit({ deadline: value })}
+          />
+          <Dropdown
+            label="Fit"
+            options={FIT_OPTIONS}
+            value={state.fit}
+            onSelect={(value) => commit({ fit: value })}
           />
           <Dropdown
             label="Sort"

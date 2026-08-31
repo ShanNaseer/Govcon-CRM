@@ -113,6 +113,9 @@ function toSummaryDto(row: OpportunitySummaryRow, now: Date): OpportunitySummary
     primaryNaicsCode: primary?.code ?? null,
     bestMatchScore,
     matchCount: row.matches.length,
+    // The relation is ordered by score, so the first row is the best match.
+    recommendation: row.matches[0]?.recommendation ?? null,
+    topMatchReasons: (row.matches[0]?.matchReasons ?? []).slice(0, 2),
     priority: derivePriority(bestMatchScore, row.responseDeadline, now),
     reviewState: deriveReviewState(row.status),
     isNew:
@@ -155,6 +158,12 @@ function toDetailDto(row: OpportunityDetailRow): OpportunityDetailDto {
 
     bestMatchScore: bestScore(row.matches.map((match) => match.overallScore)),
     matchCount: row.matches.length,
+    /*
+     * The detail page renders the full per-client match table below, so the summary
+     * verdict it inherits from the list DTO is left unset rather than duplicated.
+     */
+    recommendation: null,
+    topMatchReasons: [],
 
     naicsCodes: row.naicsCodes.map((item) => ({
       id: item.id,

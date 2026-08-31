@@ -94,11 +94,42 @@ export const opportunityReviewValues = ["unreviewed", "reviewed"] as const;
 
 export const opportunitySortValues = ["newest", "priority", "due-date", "fit-score"] as const;
 
+/**
+ * Deadline window.
+ *
+ * `open` is the default for the triage inbox: a solicitation whose response date has
+ * passed cannot be bid, so leaving it in the queue is noise. It is a filter rather
+ * than a delete — the records stay, and `expired` reaches them.
+ *
+ * `undated` is a separate option, not folded into `open`, because "no deadline
+ * stated" and "deadline in the future" are different facts and only one of them can
+ * be acted on with confidence.
+ */
+export const opportunityDeadlineValues = ["open", "expired", "undated", "all"] as const;
+
+/**
+ * Fit-score band.
+ *
+ * `strong` is the default for the triage inbox. On an unfiltered government feed most
+ * solicitations score near zero, and a queue that lists them all is the problem the
+ * matching engine exists to solve — so the inbox shows only what cleared the pursue
+ * threshold, and the other bands are one click away.
+ */
+export const opportunityFitValues = ["strong", "review", "any"] as const;
+
+/** Score floor each band imposes. `any` removes the filter entirely. */
+export const OPPORTUNITY_FIT_THRESHOLDS: Record<"strong" | "review", number> = {
+  strong: 70,
+  review: 40,
+};
+
 export const listOpportunitiesQuerySchema = z.object({
   search: optionalText(200),
   priority: z.enum(opportunityPriorityValues).optional(),
   review: z.enum(opportunityReviewValues).optional(),
   sort: z.enum(opportunitySortValues).default("due-date"),
+  deadline: z.enum(opportunityDeadlineValues).optional(),
+  fit: z.enum(opportunityFitValues).optional(),
   source: z.enum(OpportunitySourceType).optional(),
   status: z.enum(OpportunityStatus).optional(),
   agency: optionalText(250),
@@ -119,3 +150,5 @@ export type ListOpportunitiesQuery = z.infer<typeof listOpportunitiesQuerySchema
 export type OpportunityPriority = (typeof opportunityPriorityValues)[number];
 export type OpportunityReviewState = (typeof opportunityReviewValues)[number];
 export type OpportunitySort = (typeof opportunitySortValues)[number];
+export type OpportunityDeadlineFilter = (typeof opportunityDeadlineValues)[number];
+export type OpportunityFitFilter = (typeof opportunityFitValues)[number];
