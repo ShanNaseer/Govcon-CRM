@@ -72,6 +72,8 @@ export const createOpportunitySchema = z.object({
   status: z.enum(OpportunityStatus).default(OpportunityStatus.NEW),
   /** Publication status as reported by the provider — distinct from the workflow status. */
   sourceStatus: optionalText(60),
+  /** Provider version identifier, used to skip rewriting unchanged records. */
+  sourceVersion: optionalText(200),
 
   rawData: z.unknown().optional(),
 

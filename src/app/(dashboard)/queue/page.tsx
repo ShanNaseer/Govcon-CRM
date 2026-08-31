@@ -3,10 +3,11 @@ import { AlertCircle, Clock, Inbox, ListChecks, TrendingUp } from "lucide-react"
 
 import { InboxStatCard } from "@/components/opportunities/inbox-stat-card";
 import { OpportunityCard } from "@/components/opportunities/opportunity-card";
+import { Pagination } from "@/components/opportunities/pagination";
 import { Card } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/states";
 import { listOpportunitiesQuerySchema } from "@/features/opportunities/opportunity.schemas";
-import { listOpportunities, summarizeInbox } from "@/features/opportunities/opportunity.service";
+import { getInboxStats, listOpportunities } from "@/features/opportunities/opportunity.service";
 import { requirePagePermission, sessionHasPermission } from "@/lib/auth/session";
 import { safeQuery } from "@/lib/db/safe-query";
 
@@ -38,7 +39,14 @@ export default async function MyQueuePage({ searchParams }: PageProps<"/queue">)
   );
   const query = parsed.success ? parsed.data : listOpportunitiesQuerySchema.parse({});
 
-  const result = await safeQuery("my-queue", () => listOpportunities(query, now, "mine"));
+  const result = await safeQuery("my-queue", async () => {
+    const [list, stats] = await Promise.all([
+      listOpportunities(query, now, "mine"),
+      getInboxStats(query, now, "mine"),
+    ]);
+
+    return { list, stats };
+  });
 
   const header = (
     <div className="mb-6">
@@ -60,15 +68,15 @@ export default async function MyQueuePage({ searchParams }: PageProps<"/queue">)
     );
   }
 
-  const { items } = result.data;
+  const { items, total } = result.data.list;
 
   /*
-   * The same summary function the inbox uses. Its `unreviewed` count is omitted
-   * below rather than shown as zero: everything in a queue has been triaged by
-   * definition, so the figure would be a constant, and a constant on a stat card
-   * reads as information when it is not.
+   * The same summary the inbox uses, over the whole queue rather than the page. Its
+   * `unreviewed` count is omitted below rather than shown as zero: everything in a
+   * queue has been triaged by definition, so the figure would be a constant, and a
+   * constant on a stat card reads as information when it is not.
    */
-  const stats = summarizeInbox(items, now);
+  const stats = result.data.stats;
 
   return (
     <>
@@ -78,7 +86,7 @@ export default async function MyQueuePage({ searchParams }: PageProps<"/queue">)
         <InboxStatCard
           tone="brand"
           label="In My Queue"
-          value={stats.total}
+          value={stats.capped ? `${stats.total}+` : stats.total}
           icon={<ListChecks className="h-5 w-5" aria-hidden />}
         />
         <InboxStatCard
@@ -124,8 +132,8 @@ export default async function MyQueuePage({ searchParams }: PageProps<"/queue">)
         <>
           <div className="mb-3 flex items-center justify-between gap-3">
             <p className="text-sm text-ink-muted">
-              <span className="font-medium text-ink">{items.length}</span> opportunit
-              {items.length === 1 ? "y" : "ies"} assigned to you
+              Showing <span className="font-medium text-ink">{items.length}</span> of {total}{" "}
+              opportunit{total === 1 ? "y" : "ies"} assigned to you
             </p>
           </div>
 
@@ -140,6 +148,14 @@ export default async function MyQueuePage({ searchParams }: PageProps<"/queue">)
               />
             ))}
           </div>
+
+          <Pagination
+            basePath="/queue"
+            searchParams={params}
+            total={total}
+            take={query.take}
+            skip={query.skip}
+          />
         </>
       )}
     </>

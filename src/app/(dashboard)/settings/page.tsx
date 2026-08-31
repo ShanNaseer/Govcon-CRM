@@ -1,8 +1,11 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader, DefinitionList, DefinitionRow } from "@/components/ui/card";
+import { getSyncStatus } from "@/features/opportunities/opportunity.sync.service";
 import { requirePagePermission } from "@/lib/auth/session";
-import { isStorageConfigured } from "@/lib/env";
+import { safeQuery } from "@/lib/db/safe-query";
+import { formatDate } from "@/lib/utils";
+import { isHigherGovConfigured, isStorageConfigured } from "@/lib/env";
 
 export const metadata = { title: "Settings" };
 
@@ -24,6 +27,11 @@ export default async function SettingsPage() {
   await requirePagePermission("settings:read");
 
   const storageReady = isStorageConfigured();
+  const feedReady = isHigherGovConfigured();
+
+  // Behind safeQuery: a settings page reporting configuration must not itself fail
+  // because the database is unreachable — that is one of the things it is reporting.
+  const syncStatus = feedReady ? await safeQuery("sync-status", () => getSyncStatus()) : null;
 
   return (
     <>
@@ -52,16 +60,41 @@ export default async function SettingsPage() {
         </Card>
 
         <Card>
-          <CardHeader title="Opportunity Sources" description="No provider connector is enabled in this release." />
+          <CardHeader
+            title="Opportunity Sources"
+            description="HigherGov aggregates several government systems through one feed."
+          />
           <CardBody>
             <DefinitionList>
-              <DefinitionRow label="SAM.gov">
-                <Badge tone="neutral">Planned — Phase 2</Badge>
+              <DefinitionRow label="HigherGov feed">
+                {feedReady ? (
+                  <Badge tone="positive">Connected</Badge>
+                ) : (
+                  <Badge tone="warning">HIGHERGOV_API_KEY not set</Badge>
+                )}
+              </DefinitionRow>
+              <DefinitionRow label="Last sync">
+                {syncStatus?.ok && syncStatus.data.lastRunAt ? (
+                  <span className="text-sm text-ink-muted">
+                    {formatDate(syncStatus.data.lastRunAt)}
+                    {syncStatus.data.lastCapturedDate
+                      ? ` · caught up to ${syncStatus.data.lastCapturedDate}`
+                      : " · no complete day imported yet"}
+                  </span>
+                ) : (
+                  <span className="text-sm text-ink-subtle">Never run</span>
+                )}
+              </DefinitionRow>
+              <DefinitionRow label="Covers">
+                {/*
+                 * Named rather than badged as "planned": these arrive through the one
+                 * connector above, so their availability is not separately switchable.
+                 */}
+                <span className="text-sm text-ink-muted">
+                  SAM.gov, DIBBS, SBIR, Grants, State &amp; Local
+                </span>
               </DefinitionRow>
               <DefinitionRow label="BidNet">
-                <Badge tone="neutral">Planned</Badge>
-              </DefinitionRow>
-              <DefinitionRow label="State Portals">
                 <Badge tone="neutral">Planned</Badge>
               </DefinitionRow>
             </DefinitionList>

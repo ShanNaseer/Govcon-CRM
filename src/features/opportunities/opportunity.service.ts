@@ -251,6 +251,14 @@ function sortInMemory(items: OpportunitySummaryDto[], sort: OpportunitySort): Op
  */
 export type OpportunityScope = "inbox" | "mine" | "team" | "all";
 
+/** Turns a caller's scope into the repository filter, given who is asking. */
+function assignmentScopeFor(scope: OpportunityScope, userId: string): repository.AssignmentScope {
+  if (scope === "inbox") return { kind: "unclaimed" };
+  if (scope === "mine") return { kind: "owner", userId };
+  if (scope === "team") return { kind: "claimedByOthers", userId };
+  return undefined;
+}
+
 export async function listOpportunities(
   query: ListOpportunitiesQuery,
   now: Date = new Date(),
@@ -266,16 +274,11 @@ export async function listOpportunities(
     throw AppError.forbidden("Your role does not allow viewing other people's queues");
   }
 
-  const assignment: repository.AssignmentScope =
-    scope === "inbox"
-      ? { kind: "unclaimed" }
-      : scope === "mine"
-        ? { kind: "owner", userId: session.userId }
-        : scope === "team"
-          ? { kind: "claimedByOthers", userId: session.userId }
-          : undefined;
-
-  const { rows, total } = await repository.findManyOpportunities(query, now, assignment);
+  const { rows, total } = await repository.findManyOpportunities(
+    query,
+    now,
+    assignmentScopeFor(scope, session.userId),
+  );
 
   let items = rows.map((row) => toSummaryDto(row, now));
 
@@ -295,30 +298,61 @@ export async function listOpportunities(
 }
 
 /**
- * Counts for the inbox summary row.
+ * Counts for the inbox summary row, over EVERY record matching the filters.
  *
- * Computed over the same filtered result the list shows, so the cards and the list
- * below them can never disagree.
+ * Not over the page on screen. The cards are labelled "Total Inbox", "Unreviewed" and
+ * so on — claims about the inbox, not about the fifty rows below them — and computing
+ * them from the paginated list made "Total Inbox" read 50 when the inbox held 439.
+ *
+ * Takes the same query and scope as `listOpportunities`, so the cards and the list can
+ * still never disagree about what is being counted.
  */
-export function summarizeInbox(items: OpportunitySummaryDto[], now: Date): OpportunityInboxStats {
+export async function getInboxStats(
+  query: ListOpportunitiesQuery,
+  now: Date = new Date(),
+  scope: OpportunityScope = "all",
+): Promise<OpportunityInboxStats> {
+  const session = await requirePermission("opportunities:read");
+
+  const rows = await repository.findOpportunityStatsRows(
+    query,
+    now,
+    assignmentScopeFor(scope, session.userId),
+  );
+
   const weekAhead = now.getTime() + 7 * 86_400_000;
-  const scores = items
-    .map((item) => item.bestMatchScore)
-    .filter((score): score is number => score !== null);
+  const scores: number[] = [];
+
+  let unreviewed = 0;
+  let highPriority = 0;
+  let dueThisWeek = 0;
+
+  for (const row of rows) {
+    // The same derivations the cards' underlying DTOs use, applied to the raw rows.
+    if (deriveReviewState(row.status) === "unreviewed") unreviewed += 1;
+
+    const bestMatchScore = bestScore(row.matches.map((match) => match.overallScore));
+    if (bestMatchScore !== null) scores.push(bestMatchScore);
+
+    if (derivePriority(bestMatchScore, row.responseDeadline, now) === "high") highPriority += 1;
+
+    if (row.responseDeadline !== null) {
+      const deadline = row.responseDeadline.getTime();
+      if (deadline >= now.getTime() && deadline <= weekAhead) dueThisWeek += 1;
+    }
+  }
 
   return {
-    total: items.length,
-    unreviewed: items.filter((item) => item.reviewState === "unreviewed").length,
-    highPriority: items.filter((item) => item.priority === "high").length,
-    dueThisWeek: items.filter((item) => {
-      if (!item.responseDeadline) return false;
-      const deadline = new Date(item.responseDeadline).getTime();
-      return deadline >= now.getTime() && deadline <= weekAhead;
-    }).length,
+    total: rows.length,
+    unreviewed,
+    highPriority,
+    dueThisWeek,
     averageFitScore:
       scores.length === 0
         ? null
-        : Math.round(scores.reduce((total, score) => total + score, 0) / scores.length),
+        : Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length),
+    // True when the row cap truncated the count, so the UI can say "at least".
+    capped: rows.length >= repository.STATS_ROW_CAP,
   };
 }
 

@@ -95,6 +95,12 @@ export type OpportunityInboxStats = {
   unreviewed: number;
   highPriority: number;
   dueThisWeek: number;
+  /**
+   * True when more records matched than the stats query will read, so every figure
+   * above is a floor rather than an exact count. Surfaced rather than hidden — a
+   * silently wrong total is worse than an approximate one that says so.
+   */
+  capped: boolean;
   /** Mean fit score across scored records, rounded. Null when nothing is scored. */
   averageFitScore: number | null;
 };

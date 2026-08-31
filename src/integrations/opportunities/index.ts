@@ -1,5 +1,6 @@
 import type { OpportunityProvider } from "@/integrations/opportunities/provider.types";
 import type { OpportunitySourceType } from "@/generated/prisma/enums";
+import { higherGovProvider } from "@/integrations/opportunities/highergov/highergov.provider";
 
 /**
  * Provider registry.
@@ -8,11 +9,17 @@ import type { OpportunitySourceType } from "@/generated/prisma/enums";
  * importing a specific integration — nothing outside `src/integrations/` should
  * ever name a concrete provider module.
  *
- * The registry is intentionally empty: no government source is integrated in this
- * release. Registering the SAM.gov connector is the first step of Phase 2.
+ * HigherGov is registered below. It is an aggregator rather than a single source —
+ * one endpoint carries SAM.gov, DIBBS, SBIR, grants and state/local records, and the
+ * normalizer stamps each with its own upstream system. That does not fit this
+ * registry's one-connector-one-source key, so the sync service imports the connector
+ * directly and the registry entry exists for discovery only. See the note in
+ * highergov.provider.ts.
  */
 
 const providers = new Map<OpportunitySourceType, OpportunityProvider>();
+
+registerProvider(higherGovProvider);
 
 export function registerProvider(provider: OpportunityProvider): void {
   providers.set(provider.source, provider);

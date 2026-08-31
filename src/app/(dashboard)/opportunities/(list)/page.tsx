@@ -3,16 +3,20 @@ import { AlertCircle, Clock, Inbox, Search, Sparkles, TrendingUp } from "lucide-
 
 import { InboxStatCard } from "@/components/opportunities/inbox-stat-card";
 import { OpportunityCard } from "@/components/opportunities/opportunity-card";
+import { Pagination } from "@/components/opportunities/pagination";
 import {
   OpportunityInboxFilters,
   type FilterOption,
 } from "@/components/opportunities/opportunity-inbox-filters";
+import { SyncOpportunitiesButton } from "@/components/opportunities/sync-opportunities-button";
 import { Card } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/states";
 import { listOpportunitiesQuerySchema } from "@/features/opportunities/opportunity.schemas";
-import { listOpportunities, summarizeInbox } from "@/features/opportunities/opportunity.service";
+import { getInboxStats, listOpportunities } from "@/features/opportunities/opportunity.service";
+import { getSyncStatus } from "@/features/opportunities/opportunity.sync.service";
 import { OpportunitySourceType } from "@/generated/prisma/enums";
 import { requirePagePermission, sessionHasPermission } from "@/lib/auth/session";
+import { isHigherGovConfigured } from "@/lib/env";
 import { safeQuery } from "@/lib/db/safe-query";
 import { humanizeEnum } from "@/lib/utils";
 
@@ -20,12 +24,25 @@ export const metadata = { title: "GovCon Opportunities Inbox" };
 
 export const dynamic = "force-dynamic";
 
-/** Provider filter options, labelled as the design shows them. */
+/**
+ * Provider filter options.
+ *
+ * Same labels as the card's source chip — the acronyms need spelling out because
+ * `humanizeEnum` would render DIBBS as "Dibbs".
+ */
+const SOURCE_LABELS: Partial<Record<OpportunitySourceType, string>> = {
+  [OpportunitySourceType.SAM_GOV]: "SAM.gov",
+  [OpportunitySourceType.DIBBS]: "DIBBS",
+  [OpportunitySourceType.SBIR]: "SBIR",
+  [OpportunitySourceType.GRANTS]: "Grants",
+  [OpportunitySourceType.STATE_PORTAL]: "State & Local",
+};
+
 const SOURCE_OPTIONS: FilterOption[] = [
   { value: "", label: "All Sources" },
   ...Object.values(OpportunitySourceType).map((source) => ({
     value: source,
-    label: source === OpportunitySourceType.SAM_GOV ? "SAM.gov" : humanizeEnum(source),
+    label: SOURCE_LABELS[source] ?? humanizeEnum(source),
   })),
 ];
 
@@ -58,16 +75,46 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
    * Not a URL parameter. The scope is what this page IS, so letting a query string
    * widen it would let anyone browse other people's queues from the inbox.
    */
-  const result = await safeQuery("opportunities-list", () =>
-    listOpportunities(query, now, "inbox"),
-  );
+  const result = await safeQuery("opportunities-list", async () => {
+    /*
+     * The stats are a separate query over every matching record, not a reduction of
+     * the page below — see `getInboxStats`. Issued together so the two see the same
+     * database state.
+     */
+    const [list, stats] = await Promise.all([
+      listOpportunities(query, now, "inbox"),
+      getInboxStats(query, now, "inbox"),
+    ]);
+
+    return { list, stats };
+  });
+
+  const feedConfigured = isHigherGovConfigured();
+
+  /*
+   * Read through safeQuery like the list itself: a missing sync-state row or an
+   * unreachable database must not take down a page whose job is showing opportunities.
+   */
+  const syncStatus = feedConfigured
+    ? await safeQuery("sync-status", () => getSyncStatus())
+    : null;
 
   const header = (
-    <div className="mb-6">
-      <h1 className="text-[22px] leading-tight font-semibold text-ink">GovCon Opportunities Inbox</h1>
-      <p className="mt-0.5 text-[13px] leading-tight text-ink-faint">
-        Review newly discovered government opportunities before qualification.
-      </p>
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div className="min-w-0">
+        <h1 className="text-[22px] leading-tight font-semibold text-ink">GovCon Opportunities Inbox</h1>
+        <p className="mt-0.5 text-[13px] leading-tight text-ink-faint">
+          Review newly discovered government opportunities before qualification.
+        </p>
+      </div>
+
+      {/* Importing changes what the whole team sees, so it needs the write grant. */}
+      {canWrite ? (
+        <SyncOpportunitiesButton
+          configured={feedConfigured}
+          lastRunAt={syncStatus?.ok ? syncStatus.data.lastRunAt : null}
+        />
+      ) : null}
     </div>
   );
 
@@ -82,8 +129,8 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
     );
   }
 
-  const { items, total } = result.data;
-  const stats = summarizeInbox(items, now);
+  const { items, total } = result.data.list;
+  const stats = result.data.stats;
 
   const filterState = {
     search: query.search ?? "",
@@ -107,8 +154,8 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
         <InboxStatCard
           tone="brand"
           label="Total Inbox"
-          value={stats.total}
-          hint={isFiltered ? `${stats.total} matching filters` : undefined}
+          value={stats.capped ? `${stats.total}+` : stats.total}
+          hint={isFiltered ? "Matching your filters" : undefined}
           icon={<Inbox className="h-5 w-5" aria-hidden />}
         />
         <InboxStatCard
@@ -160,7 +207,9 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
           <p className="max-w-sm text-sm text-ink-muted">
             {isFiltered
               ? "Try adjusting your search or filters."
-              : "New opportunities will appear here once a provider connector imports them. No source integration is enabled in this release."}
+              : feedConfigured
+                ? "Nothing is waiting to be triaged. Use Sync now to pull the latest opportunities from HigherGov, or widen the window if today's feed is empty."
+                : "Set HIGHERGOV_API_KEY in the environment to start importing opportunities from HigherGov."}
           </p>
           {isFiltered ? (
             <Link href="/opportunities" className="mt-4 text-sm font-medium text-brand hover:underline">
@@ -187,6 +236,14 @@ export default async function OpportunitiesPage({ searchParams }: PageProps<"/op
               />
             ))}
           </div>
+
+          <Pagination
+            basePath="/opportunities"
+            searchParams={params}
+            total={total}
+            take={query.take}
+            skip={query.skip}
+          />
         </>
       )}
     </>

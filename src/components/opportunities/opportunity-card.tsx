@@ -56,7 +56,20 @@ function fitClasses(score: number): { text: string; bar: string } {
 
 /** Provider enum to the label the design shows. */
 function sourceLabel(source: string): string {
-  return source === "SAM_GOV" ? "SAM.gov" : humanizeEnum(source);
+  /*
+   * Names the upstream government system, since that is what `source` records. The
+   * three acronyms would otherwise come out title-cased by `humanizeEnum` ("Dibbs"),
+   * which reads as a typo to anyone in this industry.
+   */
+  const LABELS: Record<string, string> = {
+    SAM_GOV: "SAM.gov",
+    DIBBS: "DIBBS",
+    SBIR: "SBIR",
+    GRANTS: "Grants",
+    STATE_PORTAL: "State & Local",
+  };
+
+  return LABELS[source] ?? humanizeEnum(source);
 }
 
 function Chip({

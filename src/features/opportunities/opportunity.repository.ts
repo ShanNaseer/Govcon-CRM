@@ -160,6 +160,44 @@ export async function findManyOpportunities(
   return { rows, total };
 }
 
+/**
+ * The minimum needed to compute the inbox summary cards, over EVERY matching record
+ * rather than the page on screen.
+ *
+ * A separate, deliberately narrow query. The cards say "Total Inbox", not "on this
+ * page", so computing them from the paginated list made them wrong the moment the
+ * inbox outgrew one page — it read 50 when there were 439.
+ *
+ * Three of the five figures are derived in JavaScript (priority from the best match
+ * score and the deadline, review state from the status), which SQL cannot express
+ * without duplicating those rules in two places. Selecting three columns for every
+ * matching row and reducing them here keeps one definition of each rule. It is bounded
+ * by `STATS_ROW_CAP` so the query cannot grow without limit; past that the cards
+ * under-report, which `capped` makes visible rather than silent.
+ */
+const statsSelect = {
+  status: true,
+  responseDeadline: true,
+  matches: { select: { overallScore: true } },
+} satisfies Prisma.OpportunitySelect;
+
+export type OpportunityStatsRow = Prisma.OpportunityGetPayload<{ select: typeof statsSelect }>;
+
+/** Ceiling on rows pulled for the summary. Well above a realistic filtered inbox. */
+export const STATS_ROW_CAP = 5_000;
+
+export async function findOpportunityStatsRows(
+  query: ListOpportunitiesQuery,
+  now: Date,
+  scope: AssignmentScope = undefined,
+): Promise<OpportunityStatsRow[]> {
+  return prisma.opportunity.findMany({
+    where: buildListWhere(query, now, scope),
+    select: statsSelect,
+    take: STATS_ROW_CAP,
+  });
+}
+
 export async function findOpportunityById(id: string): Promise<OpportunityDetailRow | null> {
   return prisma.opportunity.findUnique({ where: { id }, include: opportunityDetailInclude });
 }
@@ -203,6 +241,248 @@ export async function createOpportunity(input: CreateOpportunityInput): Promise<
     },
     include: opportunityDetailInclude,
   });
+}
+
+/** What an upsert did, so a sync can report created and updated separately. */
+export type UpsertOutcome = "created" | "updated";
+
+export type BatchUpsertResult = {
+  created: number;
+  updated: number;
+  /** Already stored at the same provider version, so not written at all. */
+  unchanged: number;
+  /** Records that could not be stored. The batch continues past them. */
+  failed: number;
+};
+
+/**
+ * Fields a provider owns, and may therefore overwrite on a re-sync.
+ *
+ * THE POINT OF THIS FUNCTION IS WHAT IT LEAVES OUT. These never appear here, so an
+ * import can never restate them:
+ *
+ *   status            the team's workflow position. An amended solicitation must not
+ *                     jump a record they already marked PASSED back to NEW.
+ *   assignedToId      whose queue it is in. A re-sync must not empty someone's queue.
+ *   assignedAt
+ *   probabilityOfWin  a human's assessment, which no import can restate.
+ */
+function sourceOwnedFields(input: CreateOpportunityInput) {
+  return {
+    sourceUrl: input.sourceUrl ?? null,
+    title: input.title,
+    description: input.description ?? null,
+    solicitationNumber: input.solicitationNumber ?? null,
+    agency: input.agency ?? null,
+    subAgency: input.subAgency ?? null,
+    office: input.office ?? null,
+    postedDate: input.postedDate ?? null,
+    responseDeadline: input.responseDeadline ?? null,
+    setAside: input.setAside ?? null,
+    contractType: input.contractType ?? null,
+    estimatedValueMin: input.estimatedValueMin ?? null,
+    estimatedValueMax: input.estimatedValueMax ?? null,
+    placeCity: input.placeCity ?? null,
+    placeState: input.placeState ?? null,
+    placeCountry: input.placeCountry ?? null,
+    sourceStatus: input.sourceStatus ?? null,
+    sourceVersion: input.sourceVersion ?? null,
+    rawData: (input.rawData ?? Prisma.JsonNull) as Prisma.InputJsonValue,
+  };
+}
+
+/** Runs `task` over `items` with bounded concurrency, matching the connection pool. */
+async function mapWithConcurrency<TItem, TResult>(
+  items: TItem[],
+  limit: number,
+  task: (item: TItem) => Promise<TResult>,
+): Promise<Array<PromiseSettledResult<TResult>>> {
+  const results: Array<PromiseSettledResult<TResult>> = [];
+
+  for (let index = 0; index < items.length; index += limit) {
+    const chunk = items.slice(index, index + limit);
+    results.push(...(await Promise.allSettled(chunk.map(task))));
+  }
+
+  return results;
+}
+
+/**
+ * How many writes run at once.
+ *
+ * Matches `max` in the Prisma adapter's pool. Going wider would queue behind the
+ * pool anyway while making a failure harder to attribute.
+ */
+const WRITE_CONCURRENCY = 5;
+
+/**
+ * Inserts or refreshes a batch of opportunities from a provider feed.
+ *
+ * DELIBERATELY NOT ONE INTERACTIVE TRANSACTION PER RECORD. `DATABASE_URL` points at
+ * a connection pooler, which does not hand out the dedicated session an interactive
+ * transaction needs — a per-record `$transaction` fails with P2028 ("unable to start
+ * a transaction in the given time") under any real load, and costs four or five round
+ * trips even when it succeeds. A page of 100 records used to mean 100 transactions.
+ *
+ * Instead the work is set-shaped: one query to see what already exists, a `createMany`
+ * for the new parents, bounded-concurrency updates for the existing ones, and one
+ * pass to replace the child codes. That is roughly seven round trips for a page of
+ * new records rather than several hundred.
+ *
+ * The cost of dropping the per-record transaction is that a failure between writing a
+ * parent and writing its codes leaves that record with stale codes until the next
+ * sync corrects it. That is acceptable and self-healing; refusing to import at all is
+ * not.
+ *
+ * Child codes are replaced rather than merged, so a NAICS the agency removed in an
+ * amendment actually disappears.
+ */
+export async function upsertProviderOpportunities(
+  inputs: CreateOpportunityInput[],
+): Promise<BatchUpsertResult> {
+  if (inputs.length === 0) return { created: 0, updated: 0, unchanged: 0, failed: 0 };
+
+  /*
+   * Last occurrence wins if a page somehow repeats a key: two rows with the same
+   * `[source, externalId]` in one `createMany` would violate the unique constraint
+   * and fail the whole call.
+   */
+  const byKey = new Map<string, CreateOpportunityInput>();
+  for (const input of inputs) byKey.set(`${input.source}\u0000${input.externalId}`, input);
+  const records = [...byKey.values()];
+
+
+  const existing = await prisma.opportunity.findMany({
+    where: {
+      OR: records.map((record) => ({ source: record.source, externalId: record.externalId })),
+    },
+    select: { id: true, source: true, externalId: true, sourceVersion: true },
+  });
+
+  /** `source` and `externalId` joined by NUL, which cannot occur in either value. */
+  const key = (record: { source: string; externalId: string }): string =>
+    `${record.source}\u0000${record.externalId}`;
+
+  const idByKey: Map<string, string> = new Map(existing.map((row) => [key(row), row.id]));
+  const versionByKey: Map<string, string | null> = new Map(
+    existing.map((row) => [key(row), row.sourceVersion]),
+  );
+
+  const toCreate = records.filter((record) => !idByKey.has(key(record)));
+
+  /*
+   * A record already stored at the same provider version is left completely alone —
+   * no parent update, and no child-code churn either.
+   *
+   * This is the difference between a re-sync costing one write per record and costing
+   * nothing. A null version on either side means "cannot tell", which always rewrites:
+   * a missed amendment is a real problem, a redundant write is merely slow.
+   */
+  const existingRecords = records.filter((record) => idByKey.has(key(record)));
+
+  const toUpdate = existingRecords.filter((record) => {
+    const storedVersion = versionByKey.get(key(record)) ?? null;
+    const incomingVersion = record.sourceVersion ?? null;
+    return storedVersion === null || incomingVersion === null || storedVersion !== incomingVersion;
+  });
+
+  const unchanged = existingRecords.length - toUpdate.length;
+
+  let failed = 0;
+
+  // --- new parents, in one statement
+  if (toCreate.length > 0) {
+    await prisma.opportunity.createMany({
+      data: toCreate.map((record) => ({
+        source: record.source,
+        externalId: record.externalId,
+        ...sourceOwnedFields(record),
+        // Only ever set on insert. See sourceOwnedFields for why status is not there.
+        status: record.status,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
+  // --- existing parents, one update each because every value differs
+  if (toUpdate.length > 0) {
+    const outcomes = await mapWithConcurrency(toUpdate, WRITE_CONCURRENCY, (record) =>
+      prisma.opportunity.update({
+        where: { id: idByKey.get(key(record))! },
+        data: sourceOwnedFields(record),
+      }),
+    );
+
+    failed += outcomes.filter((outcome) => outcome.status === "rejected").length;
+  }
+
+  /*
+   * Ids are re-read rather than collected above: `createMany` does not return them,
+   * and the child codes need them. One query for the whole batch.
+   */
+  /*
+   * Only the records this batch actually wrote need their ids resolved — skipped ones
+   * keep the codes they already have. On a re-sync where nothing changed this whole
+   * tail is one query over an empty set.
+   */
+  const written = [...toCreate, ...toUpdate];
+
+  if (written.length === 0) {
+    return { created: 0, updated: 0, unchanged, failed };
+  }
+
+  const stored = await prisma.opportunity.findMany({
+    where: {
+      OR: written.map((record) => ({ source: record.source, externalId: record.externalId })),
+    },
+    select: { id: true, source: true, externalId: true },
+  });
+
+  const storedIdByKey: Map<string, string> = new Map(stored.map((row) => [key(row), row.id]));
+
+  const naicsRows = written.flatMap((record) => {
+    const id = storedIdByKey.get(key(record));
+    return id ? record.naicsCodes.map((code) => ({ ...code, opportunityId: id })) : [];
+  });
+
+  const pscRows = written.flatMap((record) => {
+    const id = storedIdByKey.get(key(record));
+    return id ? record.pscCodes.map((code) => ({ ...code, opportunityId: id })) : [];
+  });
+
+  /*
+   * Only the records that already existed need their codes cleared — a record just
+   * inserted by `createMany` has none. Four statements for the whole batch.
+   */
+  const updatedIds = toUpdate
+    .map((record) => storedIdByKey.get(key(record)))
+    .filter((id): id is string => id !== undefined);
+
+  if (updatedIds.length > 0) {
+    await prisma.opportunityNaicsCode.deleteMany({ where: { opportunityId: { in: updatedIds } } });
+    await prisma.opportunityPscCode.deleteMany({ where: { opportunityId: { in: updatedIds } } });
+  }
+
+  if (naicsRows.length > 0) {
+    await prisma.opportunityNaicsCode.createMany({ data: naicsRows, skipDuplicates: true });
+  }
+
+  if (pscRows.length > 0) {
+    await prisma.opportunityPscCode.createMany({ data: pscRows, skipDuplicates: true });
+  }
+
+  /*
+   * Counted from what actually landed, not from the intent: a `skipDuplicates` insert
+   * that collided with a concurrent sync should not be reported as created.
+   */
+  const createdCount = toCreate.filter((record) => storedIdByKey.has(key(record))).length;
+
+  return {
+    created: createdCount,
+    updated: toUpdate.length - failed,
+    unchanged,
+    failed: failed + (toCreate.length - createdCount),
+  };
 }
 
 export async function updateOpportunityStatus(

@@ -35,10 +35,22 @@ enum KeywordType {
 }
 
 /// Source system an opportunity was ingested from. Extend as providers are added.
+///
+/// This names the government system that published the solicitation, NOT the
+/// aggregator it reached us through. Records pulled via HigherGov are stamped with
+/// the upstream system its `source_type` reports (sam, dibbs, sbir, grant, sled), so
+/// the inbox's Source filter means what a user expects it to mean. That an
+/// aggregator was involved is recorded in `Opportunity.rawData`.
 enum OpportunitySourceType {
   SAM_GOV
   BIDNET
   STATE_PORTAL
+  /// Defense Logistics Agency's DIBBS.
+  DIBBS
+  /// Small Business Innovation Research / STTR solicitations.
+  SBIR
+  /// Federal grant opportunities (Grants.gov and equivalents).
+  GRANTS
   MANUAL
   OTHER
 }
@@ -309,6 +321,17 @@ model Opportunity {
   /// Publication status as reported by the source system (e.g. "active", "archived").
   sourceStatus String?
 
+  /// Provider's version identifier for this record, when it publishes one —
+  /// HigherGov's `version_key`, which changes whenever the agency amends the
+  /// solicitation and is stable otherwise.
+  ///
+  /// Purely an optimisation, and a large one: a re-sync compares this and skips the
+  /// write entirely when it has not moved. Without it every re-sync rewrites every
+  /// row it sees, which on a feed carrying thousands of records a day is most of the
+  /// cost of syncing. Null means the provider gave no version, in which case the
+  /// record is always rewritten — the safe direction.
+  sourceVersion String?
+
   /// Normalized provider payload, retained for traceability and re-normalization.
   rawData Json?
 
@@ -381,6 +404,38 @@ model OpportunityAttachment {
 
   @@unique([s3Bucket, s3Key])
   @@index([opportunityId])
+}
+
+/// How far a provider feed has been synced, so a run can catch up on its own.
+///
+/// Exists because the HigherGov API filters `captured_date` to an EXACT day rather
+/// than "since": asking for today never returns yesterday's records, so a day nobody
+/// synced is a permanent hole unless something remembers where we got to. Verified
+/// against the live API — captured_date=2026-08-25 returns fewer records than
+/// captured_date=2026-08-27, which it could not if the filter were cumulative.
+///
+/// One row per provider, keyed by name rather than by the source enum: a single
+/// aggregator feed produces records under several `OpportunitySourceType` values, so
+/// the enum is the wrong grain for a sync cursor.
+model ProviderSyncState {
+  /// Connector identifier, e.g. "highergov".
+  provider String @id
+
+  /// Last capture date (YYYY-MM-DD) fully imported, with no budget cutting it short.
+  ///
+  /// A date only lands here once every page for it has been stored. A run that stops
+  /// at its record budget leaves this alone, so the next run resumes rather than
+  /// stepping over the records it never fetched. Stored as a plain date string
+  /// because that is exactly what the provider's parameter takes — converting to a
+  /// timestamp and back would invite a timezone bug in a value that has no time.
+  lastCapturedDate String?
+
+  lastRunAt      DateTime?
+  /// Counts from the most recent run, for the settings page. Diagnostics only.
+  lastRunSummary Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ---------------------------------------------------------------------------
