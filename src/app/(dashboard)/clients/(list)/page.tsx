@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { Building2, Plus } from "lucide-react";
+import { Building2, Pencil, Plus } from "lucide-react";
 
 import { ClientFilters } from "@/components/clients/client-filters";
+import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { ButtonLink } from "@/components/ui/button";
 import { ClientStatusBadge } from "@/components/ui/badge";
@@ -107,6 +108,12 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
                     <TH>Capabilities</TH>
                     <TH>Opportunities</TH>
                     <TH>Projects</TH>
+                    {/* Header text is for screen readers: the column holds row actions. */}
+                    {canWrite ? (
+                      <TH>
+                        <span className="sr-only">Actions</span>
+                      </TH>
+                    ) : null}
                   </TR>
                 </THead>
                 <TBody>
@@ -157,6 +164,28 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clients"
                       <TD className="numeric text-ink-muted">{client.matchCount}</TD>
                       {/* Projects is a future module; the column is present so the table shape is settled. */}
                       <TD className="text-ink-subtle">—</TD>
+
+                      {canWrite ? (
+                        <TD>
+                          <div className="flex items-center gap-3">
+                            <Link
+                              href={`/clients/${client.id}/edit`}
+                              // Named per row: screen readers announce links out of
+                              // context, so a column of bare "Edit" links is useless.
+                              aria-label={`Edit ${client.name}`}
+                              className="inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:underline"
+                            >
+                              <Pencil className="h-3.5 w-3.5" aria-hidden />
+                              Edit
+                            </Link>
+                            <DeleteClientButton
+                              clientId={client.id}
+                              clientName={client.name}
+                              variant="link"
+                            />
+                          </div>
+                        </TD>
+                      ) : null}
                     </TR>
                   ))}
                 </TBody>

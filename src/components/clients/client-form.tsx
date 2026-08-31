@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 
-import { createClientAction, type ClientFormState } from "@/app/(dashboard)/clients/actions";
+import { type ClientFormState } from "@/app/(dashboard)/clients/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -70,11 +70,39 @@ function Field({
   );
 }
 
-export function ClientForm() {
-  const [state, formAction, pending] = useActionState(createClientAction, INITIAL_STATE);
+/**
+ * The create and edit form for a client.
+ *
+ * One component for both, because the fields, the validation messages and the layout
+ * are identical — a separate edit form would be the same 400 lines with a different
+ * submit label, and the two would drift.
+ *
+ * The Server Function is passed IN rather than imported. On edit the page binds the
+ * client id to `updateClientAction` server-side, so the id never travels through the
+ * browser as a form value the user could change.
+ */
+export function ClientForm({
+  action,
+  defaults,
+  submitLabel = "Create Client",
+  cancelHref = "/clients",
+}: {
+  action: (state: ClientFormState | null, formData: FormData) => Promise<ClientFormState>;
+  /** Existing values on edit. Absent on create. */
+  defaults?: Record<string, string>;
+  submitLabel?: string;
+  cancelHref?: string;
+}) {
+  const [state, formAction, pending] = useActionState(action, INITIAL_STATE);
 
   const errors = state?.fieldErrors ?? {};
-  const values = state?.values ?? {};
+
+  /*
+   * A rejected submission echoes the user's typing back, and that takes precedence
+   * over the stored record — otherwise correcting one field would revert every other
+   * edit made in the same sitting.
+   */
+  const values = state?.values ?? defaults ?? {};
 
   /** Marks a field that failed validation, so the error is visible without reading. */
   const invalid = (field: string) => (errors[field] ? "border-critical" : undefined);
@@ -428,13 +456,13 @@ export function ClientForm() {
 
       <div className="flex items-center justify-end gap-2">
         <Link
-          href="/clients"
+          href={cancelHref}
           className="inline-flex h-9 items-center rounded-md border border-line-strong bg-surface px-4 text-sm font-medium text-ink hover:bg-surface-muted"
         >
           Cancel
         </Link>
         <Button type="submit" variant="primary" disabled={pending}>
-          {pending ? "Saving…" : "Create Client"}
+          {pending ? "Saving…" : submitLabel}
         </Button>
       </div>
     </form>

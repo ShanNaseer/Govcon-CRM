@@ -1,4 +1,5 @@
 import { ClientForm } from "@/components/clients/client-form";
+import { createClientAction } from "@/app/(dashboard)/clients/actions";
 import { PageHeader } from "@/components/layout/page-header";
 import { requirePagePermission } from "@/lib/auth/session";
 
@@ -21,7 +22,7 @@ export default async function NewClientPage() {
       />
 
       <div className="max-w-4xl">
-        <ClientForm />
+        <ClientForm action={createClientAction} />
       </div>
     </>
   );

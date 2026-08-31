@@ -206,14 +206,47 @@ export async function updateClient(id: string, input: UpdateClientInput): Promis
   return toDetailDto(row);
 }
 
+/**
+ * What deleting this client would destroy.
+ *
+ * `clients:write`, not `clients:read`: the only reason to ask is to decide whether to
+ * delete, and someone who cannot delete has no business being shown the prompt.
+ */
+export async function getClientDeletionImpact(id: string): Promise<{
+  tasks: number;
+  matches: number;
+  profileRecords: number;
+}> {
+  await requirePermission("clients:write");
+
+  const existing = await repository.findClientById(id);
+  if (!existing) throw AppError.notFound("Client", id);
+
+  return repository.countClientDeletionImpact(id);
+}
+
 export async function deleteClient(id: string): Promise<void> {
   await requirePermission("clients:write");
 
   const existing = await repository.findClientById(id);
   if (!existing) throw AppError.notFound("Client", id);
 
+  /*
+   * Counted before the delete so the log records what was actually destroyed. The
+   * cascade leaves no trace afterwards, and "a client was deleted" is not enough to
+   * answer "where did those tasks go?".
+   */
+  const impact = await repository.countClientDeletionImpact(id);
+
   await repository.deleteClient(id);
-  logger.info("Client deleted", { clientId: id });
+
+  logger.info("Client deleted", {
+    clientId: id,
+    name: existing.name,
+    cascadedTasks: impact.tasks,
+    cascadedMatches: impact.matches,
+    cascadedProfileRecords: impact.profileRecords,
+  });
 }
 
 export async function getClientStatusCounts(): Promise<Record<string, number>> {

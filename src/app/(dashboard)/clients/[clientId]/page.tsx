@@ -1,6 +1,10 @@
 import { notFound } from "next/navigation";
 
+import { Pencil } from "lucide-react";
+
 import { PageHeader } from "@/components/layout/page-header";
+import { ButtonLink } from "@/components/ui/button";
+import { DeleteClientButton } from "@/components/clients/delete-client-button";
 import { ClientStatusBadge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader, DefinitionList, DefinitionRow } from "@/components/ui/card";
 import { ChipList } from "@/components/ui/chip-list";
@@ -8,7 +12,7 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { Tabs, resolveActiveTab, type TabDefinition } from "@/components/ui/tabs";
 import { findClientById } from "@/features/clients/client.service";
 import { KeywordType } from "@/generated/prisma/enums";
-import { requirePagePermission } from "@/lib/auth/session";
+import { requirePagePermission, sessionHasPermission } from "@/lib/auth/session";
 import { safeQuery } from "@/lib/db/safe-query";
 import { formatCurrencyRange, formatDate } from "@/lib/utils";
 
@@ -40,7 +44,8 @@ export default async function ClientDetailPage({
    * revoked permission reads as "not your page" rather than as an error card. The
    * service checks it again at the data — this is the courtesy, not the boundary.
    */
-  await requirePagePermission("clients:read");
+  const session = await requirePagePermission("clients:read");
+  const canWrite = sessionHasPermission(session, "clients:write");
 
   const { clientId } = await params;
   const { tab } = await searchParams;
@@ -72,7 +77,21 @@ export default async function ClientDetailPage({
         title={client.name}
         description={client.industry ?? undefined}
         breadcrumbs={[{ label: "Clients", href: "/clients" }, { label: client.name }]}
-        actions={<ClientStatusBadge status={client.status} />}
+        actions={
+          <>
+            <ClientStatusBadge status={client.status} />
+            {/* Hidden without `clients:write`, because the edit page redirects without it. */}
+            {canWrite ? (
+              <>
+                <ButtonLink href={`/clients/${client.id}/edit`} variant="secondary">
+                  <Pencil aria-hidden />
+                  Edit
+                </ButtonLink>
+                <DeleteClientButton clientId={client.id} clientName={client.name} />
+              </>
+            ) : null}
+          </>
+        }
       />
 
       <Tabs tabs={TABS} activeKey={activeTab} basePath={`/clients/${client.id}`} />

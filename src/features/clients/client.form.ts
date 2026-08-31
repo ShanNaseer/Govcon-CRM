@@ -1,6 +1,8 @@
-import { createClientSchema } from "@/features/clients/client.schemas";
+import { z } from "zod";
+
+import { createClientSchema, updateClientSchema } from "@/features/clients/client.schemas";
 import { KeywordType } from "@/generated/prisma/enums";
-import type { CreateClientInput } from "@/features/clients/client.schemas";
+import type { CreateClientInput, UpdateClientInput } from "@/features/clients/client.schemas";
 
 /**
  * Translation between the create-client form and `createClientSchema`.
@@ -100,11 +102,22 @@ export type ParsedClientForm =
   | { success: true; data: CreateClientInput }
   | { success: false; fieldErrors: Record<string, string[]> };
 
-/** Maps the form to a validated `CreateClientInput`, or to per-field messages. */
-export function parseClientForm(formData: FormData): ParsedClientForm {
+export type ParsedClientEditForm =
+  | { success: true; data: UpdateClientInput }
+  | { success: false; fieldErrors: Record<string, string[]> };
+
+/**
+ * The fields this form actually collects, mapped to schema shape.
+ *
+ * Shared by create and edit so the two cannot drift. Note what is NOT here:
+ * `capabilities`, `certifications` and `contractVehicles` exist on the client model
+ * but have no inputs on this form. That absence is load-bearing — see
+ * `parseClientEditForm`.
+ */
+function buildClientFormCandidate(formData: FormData) {
   const naicsCodes = list(formData, "naicsCodes");
 
-  const candidate = {
+  return {
     name: requiredText(formData, "name"),
     initials: text(formData, "initials"),
     industry: text(formData, "industry"),
@@ -142,10 +155,36 @@ export function parseClientForm(formData: FormData): ParsedClientForm {
       })),
     ],
   };
+}
 
-  const parsed = createClientSchema.safeParse(candidate);
+/** Maps the form to a validated `CreateClientInput`, or to per-field messages. */
+export function parseClientForm(formData: FormData): ParsedClientForm {
+  const parsed = createClientSchema.safeParse(buildClientFormCandidate(formData));
   if (parsed.success) return { success: true, data: parsed.data };
 
+  return { success: false, fieldErrors: collectFieldErrors(parsed.error) };
+}
+
+/**
+ * Maps the form to a validated `UpdateClientInput`.
+ *
+ * VALIDATED AGAINST `updateClientSchema`, NOT `createClientSchema`, and this is not a
+ * stylistic choice. `createClientSchema` defaults `capabilities`, `certifications` and
+ * `contractVehicles` to `[]`, which is right for a new client — but the repository
+ * treats an explicit array as "replace this collection wholesale", so reusing the
+ * create schema here would send three empty arrays and DELETE every capability,
+ * certification and contract vehicle the client had. The form has no inputs for them,
+ * so it must say nothing about them; `updateClientSchema` leaves them `undefined`,
+ * which the repository reads as "leave unchanged".
+ */
+export function parseClientEditForm(formData: FormData): ParsedClientEditForm {
+  const parsed = updateClientSchema.safeParse(buildClientFormCandidate(formData));
+  if (parsed.success) return { success: true, data: parsed.data };
+
+  return { success: false, fieldErrors: collectFieldErrors(parsed.error) };
+}
+
+function collectFieldErrors(error: z.ZodError): Record<string, string[]> {
   const fieldErrors: Record<string, string[]> = {};
 
   /*
@@ -157,7 +196,7 @@ export function parseClientForm(formData: FormData): ParsedClientForm {
    */
   const seenPaths = new Set<string>();
 
-  for (const issue of parsed.error.issues) {
+  for (const issue of error.issues) {
     const pathKey = issue.path.join(".");
     if (seenPaths.has(pathKey)) continue;
     seenPaths.add(pathKey);
@@ -174,5 +213,73 @@ export function parseClientForm(formData: FormData): ParsedClientForm {
     (fieldErrors[field] ??= []).push(message);
   }
 
-  return { success: false, fieldErrors };
+  return fieldErrors;
+}
+
+/**
+ * Turns a stored client into the flat string map the form renders from.
+ *
+ * The inverse of `buildClientFormCandidate`: collections become the comma-separated
+ * text the corresponding textarea shows, and NAICS is emitted primary-first so a
+ * save round-trips without silently re-designating which code is primary (the parser
+ * treats the first entry as primary).
+ */
+export function clientToFormValues(client: {
+  name: string;
+  initials: string | null;
+  industry: string | null;
+  status: string;
+  cageCode: string | null;
+  uei: string | null;
+  website: string | null;
+  email: string | null;
+  phone: string | null;
+  city: string | null;
+  state: string | null;
+  capabilityDescription: string | null;
+  securityClearance: string | null;
+  minContractValue: string | null;
+  maxContractValue: string | null;
+  geographicPreferences: string[];
+  naicsCodes: Array<{ code: string; isPrimary: boolean }>;
+  pscCodes: Array<{ code: string }>;
+  setAsides: Array<{ code: string }>;
+  preferredAgencies: Array<{ name: string }>;
+  keywords: Array<{ keyword: string; type: string }>;
+}): Record<string, string> {
+  const joined = (values: string[]) => values.join(", ");
+
+  return {
+    name: client.name,
+    initials: client.initials ?? "",
+    industry: client.industry ?? "",
+    status: client.status,
+    cageCode: client.cageCode ?? "",
+    uei: client.uei ?? "",
+    website: client.website ?? "",
+    email: client.email ?? "",
+    phone: client.phone ?? "",
+    city: client.city ?? "",
+    state: client.state ?? "",
+    capabilityDescription: client.capabilityDescription ?? "",
+    securityClearance: client.securityClearance ?? "",
+    minContractValue: client.minContractValue ?? "",
+    maxContractValue: client.maxContractValue ?? "",
+    geographicPreferences: joined(client.geographicPreferences),
+    // Primary first, so re-saving keeps the same primary code.
+    naicsCodes: joined(
+      [...client.naicsCodes]
+        .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+        .map((entry) => entry.code),
+    ),
+    pscCodes: joined(client.pscCodes.map((entry) => entry.code)),
+    setAsides: joined(client.setAsides.map((entry) => entry.code)),
+    preferredAgencies: joined(client.preferredAgencies.map((entry) => entry.name)),
+    positiveKeywords: joined(
+      client.keywords.filter((entry) => entry.type === "POSITIVE").map((entry) => entry.keyword),
+    ),
+    negativeKeywords: joined(
+      client.keywords.filter((entry) => entry.type === "NEGATIVE").map((entry) => entry.keyword),
+    ),
+  };
 }
