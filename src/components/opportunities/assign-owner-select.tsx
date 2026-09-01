@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { UserCog } from "lucide-react";
 
 import { assignOwnerAction } from "@/app/(dashboard)/opportunities/actions";
@@ -36,10 +37,21 @@ export function AssignOwnerSelect({
   const choices = owners.filter((owner) => owner.id !== currentOwnerId);
 
   /*
-   * Nothing to offer — the only assignable person already holds it. Rendering an
-   * empty select would invite a click that could not go anywhere.
+   * Nobody to offer. Says so rather than rendering nothing: an absent control is
+   * indistinguishable from a broken one, and the reason is actionable — a workspace
+   * with a single user has no one to delegate to until a colleague is added.
    */
-  if (choices.length === 0) return null;
+  if (choices.length === 0) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-ink-subtle">
+        <UserCog className="h-3 w-3 shrink-0" aria-hidden />
+        No one else to assign to —{" "}
+        <Link href="/team" className="text-brand hover:underline">
+          add a team member
+        </Link>
+      </span>
+    );
+  }
 
   function assign(assigneeId: string) {
     if (!assigneeId) return;

@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/states";
 import { listOpportunitiesQuerySchema } from "@/features/opportunities/opportunity.schemas";
 import { getInboxStats, listOpportunities } from "@/features/opportunities/opportunity.service";
+import { listAssignableOwners } from "@/features/team/team.service";
 import { requirePagePermission, sessionHasPermission } from "@/lib/auth/session";
 import { safeQuery } from "@/lib/db/safe-query";
 
@@ -27,6 +28,15 @@ export default async function MyQueuePage({ searchParams }: PageProps<"/queue">)
   const session = await requirePagePermission("opportunities:read");
   const canWrite = sessionHasPermission(session, "opportunities:write");
 
+  /*
+   * `opportunities:assign` — the grant that means "may put work on somebody else's
+   * desk". Held by Administrator by default and editable per role in the permission
+   * matrix, so this is not hard-coded to a role name. A member without it sees their
+   * own queue with no picker, which is correct: claiming work for yourself and
+   * handing it to a colleague are different capabilities.
+   */
+  const canAssign = sessionHasPermission(session, "opportunities:assign");
+
   const params = await searchParams;
   const now = new Date();
 
@@ -40,12 +50,20 @@ export default async function MyQueuePage({ searchParams }: PageProps<"/queue">)
   const query = parsed.success ? parsed.data : listOpportunitiesQuerySchema.parse({});
 
   const result = await safeQuery("my-queue", async () => {
-    const [list, stats] = await Promise.all([
+    const [list, stats, owners] = await Promise.all([
       listOpportunities(query, now, "mine"),
       getInboxStats(query, now, "mine"),
+      /*
+       * Loaded once for the page rather than per card: the roster is the same for
+       * every row, and on a remote pooled connection one query beats N.
+       *
+       * The service filters out anyone deactivated or whose role cannot open a queue,
+       * so the picker cannot offer a destination where the work would be invisible.
+       */
+      canAssign ? listAssignableOwners() : Promise.resolve([]),
     ]);
 
-    return { list, stats };
+    return { list, stats, owners };
   });
 
   const header = (
@@ -145,6 +163,7 @@ export default async function MyQueuePage({ searchParams }: PageProps<"/queue">)
                 now={now}
                 canWrite={canWrite}
                 context="queue"
+                assignableOwners={result.data.owners}
               />
             ))}
           </div>
