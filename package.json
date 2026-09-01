@@ -23,7 +23,8 @@
     "user:create": "tsx scripts/create-user.ts",
     "postinstall": "prisma generate",
     "highergov:probe": "tsx --conditions=react-server scripts/highergov-probe.ts",
-    "db:scrub-secrets": "tsx --conditions=react-server scripts/scrub-rawdata-secrets.ts"
+    "db:scrub-secrets": "tsx --conditions=react-server scripts/scrub-rawdata-secrets.ts",
+    "db:remove-demo-data": "tsx --conditions=react-server scripts/remove-demo-data.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1107.0",

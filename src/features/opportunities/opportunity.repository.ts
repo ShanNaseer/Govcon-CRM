@@ -553,6 +553,32 @@ export async function countOpportunitiesByStatus(): Promise<Record<string, numbe
   return Object.fromEntries(grouped.map((row) => [row.status, row._count._all]));
 }
 
+/**
+ * The qualified pipeline: what the team could actually act on.
+ *
+ * ONE DEFINITION, shared by the inbox and the dashboard, because the two disagreeing
+ * is worse than either being wrong. The dashboard previously aggregated every
+ * imported row, so it reported a $3.8bn pipeline across 458 "active opportunities"
+ * while the inbox — filtered to the same reality — showed 7. Both numbers were
+ * computed correctly; they were answering different questions, and only one of them
+ * was the question a user was asking.
+ *
+ *   still open   deadline on or after tomorrow, so today's closures are excluded
+ *   qualified    scored at or above the pursue threshold against a client profile
+ *
+ * Deliberately NOT status-based. Everything the connector imports is NEW, so a
+ * status filter would either admit everything or nothing.
+ */
+export function qualifiedPipelineWhere(
+  now: Date,
+  minMatchScore: number,
+): Prisma.OpportunityWhereInput {
+  return {
+    responseDeadline: { gte: startOfNextBusinessDayUtc(now) },
+    matches: { some: { overallScore: { gte: minMatchScore } } },
+  };
+}
+
 /** Opportunities with at least one high-scoring match, used by the dashboard cards. */
 export async function countStrongMatches(threshold: number): Promise<number> {
   return prisma.opportunity.count({
@@ -560,10 +586,18 @@ export async function countStrongMatches(threshold: number): Promise<number> {
   });
 }
 
-export async function countClosingSoon(now: Date, withinDays: number): Promise<number> {
+export async function countClosingSoon(
+  now: Date,
+  withinDays: number,
+  minMatchScore: number,
+): Promise<number> {
   return prisma.opportunity.count({
     where: {
-      responseDeadline: { gte: now, lte: new Date(now.getTime() + withinDays * 86_400_000) },
+      ...qualifiedPipelineWhere(now, minMatchScore),
+      responseDeadline: {
+        gte: startOfNextBusinessDayUtc(now),
+        lte: new Date(now.getTime() + withinDays * 86_400_000),
+      },
       status: { notIn: [OpportunityStatus.PASSED, OpportunityStatus.LOST, OpportunityStatus.WON] },
     },
   });
@@ -590,7 +624,17 @@ export type StatusAggregateRow = {
   pricedCount: number;
 };
 
-export async function aggregateByStatus(): Promise<StatusAggregateRow[]> {
+/**
+ * @param scope Restricts the aggregate to the qualified pipeline. Expressed as SQL
+ *   rather than a Prisma filter because this is a raw query — see the note above on
+ *   why it has to be. `qualifiedPipelineSql` is the same rule as
+ *   `qualifiedPipelineWhere`, and the two are checked against each other by
+ *   `scripts/verify-dashboard.ts`.
+ */
+export async function aggregateByStatus(scope: {
+  deadlineFrom: Date;
+  minMatchScore: number;
+}): Promise<StatusAggregateRow[]> {
   return prisma.$queryRaw<StatusAggregateRow[]>(Prisma.sql`
     SELECT
       "status",
@@ -604,7 +648,13 @@ export async function aggregateByStatus(): Promise<StatusAggregateRow[]> {
         0
       )::text AS "weightedValue",
       COUNT(COALESCE("estimatedValueMax", "estimatedValueMin"))::int AS "pricedCount"
-    FROM "Opportunity"
+    FROM "Opportunity" o
+    WHERE o."responseDeadline" >= ${scope.deadlineFrom}
+      AND EXISTS (
+        SELECT 1 FROM "OpportunityMatch" m
+        WHERE m."opportunityId" = o."id"
+          AND m."overallScore" >= ${scope.minMatchScore}
+      )
     GROUP BY "status"
   `);
 }
@@ -653,10 +703,17 @@ export async function findAwardForecast(
  * Bucketing into overdue / this week / upcoming happens in the service, where the
  * clock is already injected.
  */
-export async function findOpenDeadlines(take: number) {
+/**
+ * Deadlines for the dashboard panel, over the qualified pipeline only.
+ *
+ * Previously every imported row, which made the panel report 48 solicitations
+ * "overdue" — none of which anyone had ever intended to bid. An overdue warning for
+ * work nobody was doing is not a warning, it is a reason to stop reading the panel.
+ */
+export async function findOpenDeadlines(take: number, now: Date, minMatchScore: number) {
   return prisma.opportunity.findMany({
     where: {
-      responseDeadline: { not: null },
+      ...qualifiedPipelineWhere(now, minMatchScore),
       status: {
         notIn: [OpportunityStatus.PASSED, OpportunityStatus.LOST, OpportunityStatus.WON],
       },

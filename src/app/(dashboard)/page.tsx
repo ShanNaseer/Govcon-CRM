@@ -31,6 +31,7 @@ import type {
   DashboardDeadlineDto,
   DashboardOpportunityDto,
 } from "@/features/opportunities/opportunity.types";
+import { PURSUE_THRESHOLD } from "@/features/matching/matching.service";
 import { requireUser } from "@/lib/auth/session";
 import { safeQuery } from "@/lib/db/safe-query";
 import { cn, formatDate, formatMillions } from "@/lib/utils";
@@ -151,7 +152,15 @@ export default async function DashboardPage() {
   const result = await safeQuery("dashboard", async () => {
     const [stats, recent] = await Promise.all([
       getDashboardStats(now),
-      listOpportunities({ take: 5, skip: 0, sort: "due-date" }, now),
+      /*
+       * Same scope as the stat cards above and the opportunities page: open, and
+       * scored at or above the pursue threshold. A "recent opportunities" list that
+       * showed expired, unscored records would contradict every figure beside it.
+       */
+      listOpportunities(
+        { take: 5, skip: 0, sort: "due-date", deadline: "open", minMatchScore: PURSUE_THRESHOLD },
+        now,
+      ),
     ]);
     return { stats, recent };
   });
@@ -159,7 +168,7 @@ export default async function DashboardPage() {
   const header = (
     <PageHeader
       title="Lifecycle Dashboard"
-      description="Complete operational overview and performance metrics across the GovCon lifecycle"
+      description="Open opportunities scored at or above the pursue threshold — the same set the opportunities page lists"
       actions={
         <ButtonLink href="/opportunities" variant="primary">
           <Target aria-hidden />
@@ -194,7 +203,7 @@ export default async function DashboardPage() {
           icon={<DollarSign className="h-5 w-5" aria-hidden />}
           value={formatMillions(stats.pipelineValue)}
           label="Pipeline Value"
-          hint={`${stats.activeCount} Active Opportunit${stats.activeCount === 1 ? "y" : "ies"}`}
+          hint={`${stats.activeCount} Qualified Opportunit${stats.activeCount === 1 ? "y" : "ies"}`}
         />
         <StatCard
           tone="positive"
@@ -208,7 +217,7 @@ export default async function DashboardPage() {
           icon={<ShoppingCart className="h-5 w-5" aria-hidden />}
           value={formatMillions(stats.averageDealSize)}
           label="Avg Deal Size"
-          hint="Per Active Opportunity"
+          hint="Per Qualified Opportunity"
         />
         <StatCard
           tone="warning"

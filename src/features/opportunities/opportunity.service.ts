@@ -24,10 +24,12 @@ import type {
   OpportunitySummaryDto,
   PipelineStageDto,
 } from "@/features/opportunities/opportunity.types";
+import { PURSUE_THRESHOLD } from "@/features/matching/matching.service";
 import { listAssignableOwners } from "@/features/team/team.service";
 import { OpportunityStatus } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/api/errors";
 import { requirePermission } from "@/lib/auth/session";
+import { startOfNextBusinessDayUtc } from "@/lib/business-date";
 import { logger } from "@/lib/logger";
 
 /**
@@ -699,11 +701,27 @@ function bucketDeadlines(
 export async function getDashboardStats(now: Date = new Date()): Promise<OpportunityDashboardStats> {
   await requirePermission("dashboard:read");
 
+  /*
+   * Every figure on this dashboard describes the QUALIFIED PIPELINE — still open, and
+   * scored at or above the pursue threshold — which is the same set the opportunities
+   * page lists. Aggregating the raw import instead reported a $3.8bn pipeline across
+   * 458 "active opportunities" while the inbox showed 7, and a dashboard that
+   * contradicts the page it summarises is worse than no dashboard.
+   *
+   * Awards and the forecast are the exception: they are driven by status (WON, and
+   * SUBMITTED with a high win probability), so filtering them by fit or by a future
+   * deadline would hide the very records they exist to show.
+   */
+  const qualifiedScope = {
+    deadlineFrom: startOfNextBusinessDayUtc(now),
+    minMatchScore: PURSUE_THRESHOLD,
+  };
+
   const [aggregates, strongMatchCount, closingSoonCount, recentAwards, awardForecast, deadlineRows] =
     await Promise.all([
-      repository.aggregateByStatus(),
+      repository.aggregateByStatus(qualifiedScope),
       repository.countStrongMatches(STRONG_MATCH_THRESHOLD),
-      repository.countClosingSoon(now, CLOSING_SOON_DAYS),
+      repository.countClosingSoon(now, CLOSING_SOON_DAYS, PURSUE_THRESHOLD),
       repository.findRecentAwards(PANEL_LIST_SIZE),
       repository.findAwardForecast(
         now,
@@ -713,7 +731,7 @@ export async function getDashboardStats(now: Date = new Date()): Promise<Opportu
       ),
       // Deliberately capped: the panel shows three per column, and a pathological
       // backlog must not turn the dashboard into a full table scan.
-      repository.findOpenDeadlines(200),
+      repository.findOpenDeadlines(200, now, PURSUE_THRESHOLD),
     ]);
 
   const byStatus = Object.fromEntries(
