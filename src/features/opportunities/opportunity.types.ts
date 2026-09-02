@@ -93,6 +93,11 @@ export type OpportunitySummaryDto = {
   assignedToId: string | null;
   /** Their display name, for the card's owner chip. Null when unclaimed. */
   assignedToName: string | null;
+  /**
+   * Who delegated it, when it was handed over rather than self-claimed. Lets a queue
+   * distinguish "I am working this" from "I gave this to someone and am following it".
+   */
+  assignedById: string | null;
   /** ISO 8601 of when it was claimed, or null. */
   assignedAt: string | null;
 };

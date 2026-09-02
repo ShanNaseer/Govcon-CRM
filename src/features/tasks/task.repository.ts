@@ -7,6 +7,7 @@ import type {
   ListTasksQuery,
   UpdateTaskInput,
 } from "@/features/tasks/task.schemas";
+import { startOfNextBusinessDayUtc } from "@/lib/business-date";
 import { prisma } from "@/lib/db/prisma";
 
 /** Data access for the Task aggregate. The only module that queries Prisma for tasks. */
@@ -131,7 +132,17 @@ export async function deleteTask(id: string): Promise<void> {
 }
 
 /** Relation options for the create/edit dialog. Capped — these feed a `<select>`. */
-export async function findFormOptions() {
+/**
+ * Score at or above which an unclaimed opportunity is offered as a link target.
+ *
+ * The same pursue threshold the inbox and dashboard use. Duplicated as a constant
+ * rather than imported from the matching service to keep this repository free of a
+ * dependency on that feature; the two are checked against each other by the task
+ * form's own verification.
+ */
+const QUALIFIED_MATCH_SCORE = 70;
+
+export async function findFormOptions(now: Date = new Date()) {
   const [assignees, opportunities, clients] = await Promise.all([
     prisma.user.findMany({
       where: { isActive: true },
@@ -139,7 +150,23 @@ export async function findFormOptions() {
       orderBy: { name: "asc" },
       take: 200,
     }),
+    /*
+     * Only opportunities anyone is actually working: in someone's queue, or open and
+     * scored well enough to appear on the opportunities page. Offering all 454
+     * imported records — most expired, most ruled out by the matching engine — makes
+     * the picker a scroll through the raw feed rather than a way to attach a task to
+     * the work in hand.
+     */
     prisma.opportunity.findMany({
+      where: {
+        OR: [
+          { NOT: { assignedToId: null } },
+          {
+            responseDeadline: { gte: startOfNextBusinessDayUtc(now) },
+            matches: { some: { overallScore: { gte: QUALIFIED_MATCH_SCORE } } },
+          },
+        ],
+      },
       select: { id: true, title: true },
       orderBy: { responseDeadline: { sort: "asc", nulls: "last" } },
       take: 200,

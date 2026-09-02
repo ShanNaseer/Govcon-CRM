@@ -43,6 +43,7 @@ const opportunitySummarySelect = {
   estimatedValueMin: true,
   estimatedValueMax: true,
   assignedToId: true,
+  assignedById: true,
   assignedAt: true,
   // Name only. The card shows who holds the record; it has no need for their
   // email, and a DTO that carried one would put it in the RSC payload.
@@ -100,11 +101,26 @@ function assignmentFilter(scope: AssignmentScope): Prisma.OpportunityWhereInput 
   if (!scope) return null;
 
   if (scope.kind === "unclaimed") return { assignedToId: null };
-  if (scope.kind === "owner") return { assignedToId: scope.userId };
+
+  /*
+   * A queue holds what you are working AND what you handed to someone else. A manager
+   * who delegates an opportunity still has to follow it, so losing it from their queue
+   * the moment they assign it would make delegating feel like discarding.
+   */
+  if (scope.kind === "owner") {
+    return { OR: [{ assignedToId: scope.userId }, { assignedById: scope.userId }] };
+  }
 
   // `not: null` as well as `not: userId` — Postgres would drop the NULL rows on the
-  // inequality alone, but stating both makes the intent survive a rewrite.
-  return { AND: [{ assignedToId: { not: null } }, { assignedToId: { not: scope.userId } }] };
+  // inequality alone, but stating both makes the intent survive a rewrite. Records the
+  // viewer delegated are theirs, so they belong to "mine" rather than to "the team".
+  return {
+    AND: [
+      { assignedToId: { not: null } },
+      { assignedToId: { not: scope.userId } },
+      { assignedById: { not: scope.userId } },
+    ],
+  };
 }
 
 function buildListWhere(
@@ -528,6 +544,8 @@ export async function updateOpportunityStatus(
 export async function setOpportunityOwner(
   id: string,
   assignedToId: string | null,
+  /** Who delegated it. Null when the holder claimed it themselves. */
+  assignedById: string | null,
   status: UpdateOpportunityStatusInput["status"],
   now: Date,
 ): Promise<OpportunityDetailRow> {
@@ -535,7 +553,11 @@ export async function setOpportunityOwner(
     where: { id },
     data: {
       assignedToId,
-      // Cleared on release, so the column never claims a hand-off that was undone.
+      /*
+       * Both cleared on release, so neither column can claim a hand-off that was
+       * undone — a stale delegator would keep the record in a queue it had left.
+       */
+      assignedById: assignedToId === null ? null : assignedById,
       assignedAt: assignedToId === null ? null : now,
       status,
     },

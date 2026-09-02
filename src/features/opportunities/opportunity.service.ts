@@ -125,6 +125,7 @@ function toSummaryDto(row: OpportunitySummaryRow, now: Date): OpportunitySummary
       now.getTime() - row.postedDate.getTime() <= NEW_FOR_DAYS * 86_400_000,
     assignedToId: row.assignedToId,
     assignedToName: row.assignedTo?.name ?? null,
+    assignedById: row.assignedById,
     assignedAt: dateToIso(row.assignedAt),
   };
 }
@@ -154,6 +155,7 @@ function toDetailDto(row: OpportunityDetailRow): OpportunityDetailDto {
     sourceStatus: row.sourceStatus,
     assignedToId: row.assignedToId,
     assignedToName: row.assignedTo?.name ?? null,
+    assignedById: row.assignedById,
     assignedAt: dateToIso(row.assignedAt),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -455,6 +457,8 @@ export async function claimOpportunity(
   const row = await repository.setOpportunityOwner(
     id,
     session.userId,
+    // No delegator: they took it themselves.
+    null,
     OpportunityStatus.INTERESTED,
     now,
   );
@@ -503,9 +507,14 @@ export async function assignOpportunityTo(
     throw AppError.validation(`This is already in ${assignee.name}'s queue.`);
   }
 
+  /*
+   * The delegator is recorded, which is what keeps the record in THEIR queue as well
+   * as the assignee's — see the note on `assignedById` in the schema.
+   */
   const row = await repository.setOpportunityOwner(
     id,
     assigneeId,
+    session.userId,
     OpportunityStatus.INTERESTED,
     now,
   );
@@ -550,7 +559,7 @@ export async function releaseOpportunity(
     throw AppError.forbidden("Only the person holding an opportunity can return it to the inbox.");
   }
 
-  const row = await repository.setOpportunityOwner(id, null, OpportunityStatus.REVIEWING, now);
+  const row = await repository.setOpportunityOwner(id, null, null, OpportunityStatus.REVIEWING, now);
 
   logger.info("Opportunity released", {
     opportunityId: id,

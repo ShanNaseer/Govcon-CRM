@@ -316,6 +316,20 @@ model Opportunity {
   assignedTo   User?     @relation("OpportunityOwner", fields: [assignedToId], references: [id], onDelete: SetNull)
   assignedAt   DateTime?
 
+  /// Who delegated it, when someone handed it to the holder rather than the holder
+  /// claiming it themselves.
+  ///
+  /// Ownership stays SINGLE-VALUED — exactly one person is accountable for the work —
+  /// while this records the supervisory interest. A manager who hands an opportunity
+  /// to a colleague still needs it in their own queue to follow, so "My Queue" reads
+  /// as assignedToId = me OR assignedById = me. Modelling that as two owners instead
+  /// would make "whose job is this?" unanswerable.
+  ///
+  /// Null when the holder claimed it themselves, and cleared along with the holder
+  /// when it returns to the inbox.
+  assignedById String?
+  assignedBy   User?     @relation("OpportunityDelegator", fields: [assignedById], references: [id], onDelete: SetNull)
+
   /// Internal workflow status.
   status       OpportunityStatus @default(NEW)
   /// Publication status as reported by the source system (e.g. "active", "archived").
@@ -350,6 +364,8 @@ model Opportunity {
   // Every "My Queue" read filters on this, and every inbox read filters on it
   // being null.
   @@index([assignedToId])
+  // "My Queue" filters on either side of the delegation.
+  @@index([assignedById])
   @@index([responseDeadline])
   @@index([postedDate])
   @@index([agency])
@@ -514,6 +530,9 @@ model User {
 
   /// Opportunities this person has taken into their queue.
   ownedOpportunities Opportunity[] @relation("OpportunityOwner")
+
+  /// Opportunities this person handed to someone else, which stay in their queue.
+  delegatedOpportunities Opportunity[] @relation("OpportunityDelegator")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

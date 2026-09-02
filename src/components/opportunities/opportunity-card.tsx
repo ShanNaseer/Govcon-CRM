@@ -149,6 +149,17 @@ export function OpportunityCard({
   const isUrgent = remainingDays !== null && remainingDays <= 7;
   const isReviewed = opportunity.reviewState === "reviewed";
 
+  /*
+   * True when this appears in the viewer's queue only because they delegated it. The
+   * viewer's id is not sent to the card; `assignedById` being set while the holder is
+   * someone else is enough, because a queue only ever contains records the viewer
+   * either holds or delegated.
+   */
+  const delegatedToSomeoneElse =
+    context === "queue" &&
+    opportunity.assignedById !== null &&
+    opportunity.assignedById !== opportunity.assignedToId;
+
   return (
     <article className="relative overflow-hidden rounded-inbox-card border border-line bg-surface transition-shadow hover:shadow-sm">
       <div aria-hidden className={cn("absolute inset-y-0 left-0 w-1", priority.stripe)} />
@@ -226,8 +237,17 @@ export function OpportunityCard({
               {opportunity.assignedToName ? (
                 <span className="inline-flex min-w-0 items-center gap-1 text-brand">
                   <UserCheck className="h-3 w-3 shrink-0" aria-hidden />
-                  <span className="max-w-40 truncate">
-                    {context === "queue" ? "In your queue" : opportunity.assignedToName}
+                  <span className="max-w-56 truncate">
+                    {/*
+                      * In a queue the viewer either holds it or delegated it, and the
+                      * two need telling apart — "In your queue" on work sitting on a
+                      * colleague's desk would be actively misleading.
+                      */}
+                    {context === "queue"
+                      ? delegatedToSomeoneElse
+                        ? `Assigned to ${opportunity.assignedToName}`
+                        : "In your queue"
+                      : opportunity.assignedToName}
                     {opportunity.assignedAt ? ` · ${formatDate(opportunity.assignedAt)}` : ""}
                   </span>
                 </span>
